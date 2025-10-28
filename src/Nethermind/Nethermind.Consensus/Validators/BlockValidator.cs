@@ -163,6 +163,67 @@ public class BlockValidator(
 
         if (_logger.IsWarn) _logger.Warn($"Processed block {processedBlock.ToString(Block.Format.Short)} is invalid:");
         if (_logger.IsWarn) _logger.Warn($"- hash: expected {suggestedBlock.Hash}, got {processedBlock.Hash}");
+
+        // Log ALL header fields to identify which one differs
+        if (_logger.IsWarn) _logger.Warn($"=== COMPREHENSIVE FIELD COMPARISON ===");
+
+        // Fields that contribute to block hash calculation (in RLP encoding order)
+        if (processedBlock.Header.ParentHash != suggestedBlock.Header.ParentHash)
+            if (_logger.IsWarn) _logger.Warn($"- parent hash: expected {suggestedBlock.Header.ParentHash}, got {processedBlock.Header.ParentHash}");
+
+        if (processedBlock.Header.UnclesHash != suggestedBlock.Header.UnclesHash)
+            if (_logger.IsWarn) _logger.Warn($"- uncles hash: expected {suggestedBlock.Header.UnclesHash}, got {processedBlock.Header.UnclesHash}");
+
+        if (processedBlock.Header.Beneficiary != suggestedBlock.Header.Beneficiary)
+            if (_logger.IsWarn) _logger.Warn($"- beneficiary: expected {suggestedBlock.Header.Beneficiary}, got {processedBlock.Header.Beneficiary}");
+
+        if (processedBlock.Header.StateRoot != suggestedBlock.Header.StateRoot)
+            if (_logger.IsWarn) _logger.Warn($"- state root: expected {suggestedBlock.Header.StateRoot}, got {processedBlock.Header.StateRoot}");
+
+        if (processedBlock.Header.TxRoot != suggestedBlock.Header.TxRoot)
+            if (_logger.IsWarn) _logger.Warn($"- tx root: expected {suggestedBlock.Header.TxRoot}, got {processedBlock.Header.TxRoot}");
+
+        if (processedBlock.Header.ReceiptsRoot != suggestedBlock.Header.ReceiptsRoot)
+            if (_logger.IsWarn) _logger.Warn($"- receipts root: expected {suggestedBlock.Header.ReceiptsRoot}, got {processedBlock.Header.ReceiptsRoot}");
+
+        if (processedBlock.Header.Bloom != suggestedBlock.Header.Bloom)
+            if (_logger.IsWarn) _logger.Warn($"- bloom: expected {suggestedBlock.Header.Bloom}, got {processedBlock.Header.Bloom}");
+
+        if (processedBlock.Header.Difficulty != suggestedBlock.Header.Difficulty)
+            if (_logger.IsWarn) _logger.Warn($"- difficulty: expected {suggestedBlock.Header.Difficulty}, got {processedBlock.Header.Difficulty}");
+
+        if (processedBlock.Header.Number != suggestedBlock.Header.Number)
+            if (_logger.IsWarn) _logger.Warn($"- number: expected {suggestedBlock.Header.Number}, got {processedBlock.Header.Number}");
+
+        if (processedBlock.Header.GasLimit != suggestedBlock.Header.GasLimit)
+            if (_logger.IsWarn) _logger.Warn($"- gas limit: expected {suggestedBlock.Header.GasLimit}, got {processedBlock.Header.GasLimit}");
+
+        if (processedBlock.Header.Timestamp != suggestedBlock.Header.Timestamp)
+            if (_logger.IsWarn) _logger.Warn($"- timestamp: expected {suggestedBlock.Header.Timestamp}, got {processedBlock.Header.Timestamp}");
+
+        if ((processedBlock.Header.ExtraData ?? Array.Empty<byte>()).AsSpan().SequenceEqual((suggestedBlock.Header.ExtraData ?? Array.Empty<byte>()).AsSpan()) is false)
+            if (_logger.IsWarn) _logger.Warn($"- extra data: expected {suggestedBlock.Header.ExtraData?.ToHexString() ?? "null"}, got {processedBlock.Header.ExtraData?.ToHexString() ?? "null"}");
+
+        if (processedBlock.Header.MixHash != suggestedBlock.Header.MixHash)
+            if (_logger.IsWarn) _logger.Warn($"- mix hash: expected {suggestedBlock.Header.MixHash}, got {processedBlock.Header.MixHash}");
+
+        if (processedBlock.Header.Nonce != suggestedBlock.Header.Nonce)
+            if (_logger.IsWarn) _logger.Warn($"- nonce: expected {suggestedBlock.Header.Nonce}, got {processedBlock.Header.Nonce}");
+
+        if (processedBlock.Header.BaseFeePerGas != suggestedBlock.Header.BaseFeePerGas)
+            if (_logger.IsWarn) _logger.Warn($"- base fee per gas: expected {suggestedBlock.Header.BaseFeePerGas}, got {processedBlock.Header.BaseFeePerGas}");
+
+        if (processedBlock.Header.WithdrawalsRoot != suggestedBlock.Header.WithdrawalsRoot)
+            if (_logger.IsWarn) _logger.Warn($"- withdrawals root: expected {suggestedBlock.Header.WithdrawalsRoot}, got {processedBlock.Header.WithdrawalsRoot}");
+
+        if (processedBlock.Header.AuRaStep != suggestedBlock.Header.AuRaStep)
+            if (_logger.IsWarn) _logger.Warn($"- aura step: expected {suggestedBlock.Header.AuRaStep}, got {processedBlock.Header.AuRaStep}");
+
+        if ((processedBlock.Header.AuRaSignature ?? Array.Empty<byte>()).AsSpan().SequenceEqual((suggestedBlock.Header.AuRaSignature ?? Array.Empty<byte>()).AsSpan()) is false)
+            if (_logger.IsWarn) _logger.Warn($"- aura signature: expected {suggestedBlock.Header.AuRaSignature?.ToHexString() ?? "null"}, got {processedBlock.Header.AuRaSignature?.ToHexString() ?? "null"}");
+
+        if (_logger.IsWarn) _logger.Warn($"=== END FIELD COMPARISON ===");
+
         error = null;
         if (processedBlock.Header.GasUsed != suggestedBlock.Header.GasUsed)
         {

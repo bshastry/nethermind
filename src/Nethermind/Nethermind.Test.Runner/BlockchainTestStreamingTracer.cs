@@ -110,7 +110,6 @@ public class BlockchainTestStreamingTracer(GethTraceOptions options, Stream? out
         writer.WriteString("name", testName);
         writer.WriteBoolean("pass", pass);
         writer.WriteString("fork", spec.ToString());
-        writer.WriteNumber("v", 1);
 
         // Optional fields (only if available)
         if (duration.HasValue)

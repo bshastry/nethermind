@@ -248,7 +248,12 @@ public class BlockchainTestsRunner(
         public ITxTracer StartNewTxTrace(Transaction? tx) => _receiptsTracer.StartNewTxTrace(tx);
         public void EndTxTrace() => _receiptsTracer.EndTxTrace();
         public void EndTxTrace(TxReceipt? receipt) => _receiptsTracer.EndTxTrace(receipt);
-        public void EndBlockTrace() => _receiptsTracer.EndBlockTrace();
+        public void EndBlockTrace()
+        {
+            _receiptsTracer.EndBlockTrace();
+            // Finalize block trace after EndBlockTrace completes to write blockEnd with state root and bloom
+            _blockTracer.FinalizeBlockTrace();
+        }
         public void TracePreExecution(PreExecutionOperation operation) => _receiptsTracer.TracePreExecution(operation);
         public void TracePostExecution(PostExecutionOperation operation) => _receiptsTracer.TracePostExecution(operation);
         public void TraceValidation(ValidationOperation operation) => _receiptsTracer.TraceValidation(operation);
@@ -323,6 +328,8 @@ public class BlockchainTestsRunner(
         {
             _testTracer.EndBlockTrace();
             _receiptsTracer.EndBlockTrace();
+            // Finalize block trace after EndBlockTrace completes to write blockEnd with state root and bloom
+            _blockTracer.FinalizeBlockTrace();
         }
 
         public void TracePreExecution(PreExecutionOperation operation)

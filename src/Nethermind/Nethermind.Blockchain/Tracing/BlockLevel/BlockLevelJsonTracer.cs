@@ -179,14 +179,34 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
 
     public override void EndBlockTrace()
     {
+        // Note: We do NOT write blockEnd here because:
+        // 1. BlockReceiptsTracer calls this method BEFORE calculating the bloom filter
+        // 2. We need both state root AND bloom to be set before writing blockEnd
+        // 3. BlockProcessor will call FinalizeBlockTrace() after EndBlockTrace() completes
         base.EndBlockTrace();
 
+        // Flush to ensure all records written so far are flushed
+        lock (_writeLock)
+        {
+            _writer.Flush();
+        }
+    }
+
+    /// <summary>
+    /// Finalizes block trace by writing the blockEnd record.
+    /// MUST be called AFTER EndBlockTrace() completes so that:
+    /// 1. State root is calculated and set on block header
+    /// 2. Bloom filter is calculated and set by BlockReceiptsTracer
+    /// 3. Before block hash calculation
+    /// </summary>
+    public void FinalizeBlockTrace()
+    {
         if (ShouldTrace(TraceLevel.BlockLifecycle) && _currentBlock is not null)
         {
             WriteBlockEnd(_currentBlock);
         }
 
-        // Flush to ensure all records are written
+        // Final flush
         lock (_writeLock)
         {
             _writer.Flush();
@@ -288,7 +308,6 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
             blobVersionedHashes = tx.BlobVersionedHashes?.Length > 0 ?
                 tx.BlobVersionedHashes.Select(h => h is not null ? "0x" + Convert.ToHexString(h).ToLowerInvariant() : null).ToArray() : null,
             // ChainId should always be present for transactions that have it set
-            chainId = tx.ChainId.HasValue ? ToHex(tx.ChainId.Value) : null,
             cumulativeGasUsedBefore = ToHex(_cumulativeGasUsed),
             from = CanonicalFormatHelpers.ToCanonicalAddress(tx.SenderAddress),
             gasLimit = ToHex(tx.GasLimit),
@@ -325,9 +344,7 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
                 effectiveGasPrice = tx is not null ? ToHex(tx.GasPrice) : "0x0",
                 gasPrice = tx is not null ? ToHex(tx.GasPrice) : "0x0",
                 gasUsed = "0x0",
-                logs = (object?)null,
                 logsBloom = "0x" + new string('0', 512),
-                output = "0x",
                 status = "0x1",
                 txHash = tx?.Hash is not null ? CanonicalFormatHelpers.ToCanonicalHash(tx.Hash) : string.Empty
             });
@@ -349,6 +366,9 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
         }
 
         // Build complete txEnd record from receipt with alphabetically ordered fields
+        // Note: We do NOT include the 'logs' array here - logs are captured in operation-level traces (EIP-3155)
+        // and summarized by logsBloom. Including individual logs in txEnd would duplicate data and cause
+        // false positives in differential testing vs geth.
         var record = new
         {
             type = "txEnd",
@@ -357,19 +377,8 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
             contractAddress = receipt.ContractAddress is not null ?
                 CanonicalFormatHelpers.ToCanonicalAddress(receipt.ContractAddress) : null,
             cumulativeGasUsed = ToHex(receipt.GasUsedTotal),
-            effectiveGasPrice = ToHex(effectiveGasPrice),
-            // Optional: error only if transaction failed
-            error = receipt.Error,
-            gasPrice = tx is not null ? ToHex(tx.GasPrice) : "0x0",
             gasUsed = ToHex(receipt.GasUsed),
-            logs = receipt.Logs?.Length > 0 ? receipt.Logs.Select(log => new
-            {
-                address = CanonicalFormatHelpers.ToCanonicalAddress(log.Address),
-                data = "0x" + (log.Data?.ToHexString() ?? string.Empty).ToLowerInvariant(),
-                topics = log.Topics?.Select(t => CanonicalFormatHelpers.ToCanonicalHash(t)).ToArray() ?? Array.Empty<string>()
-            }).ToArray() : null,
             logsBloom = receipt.Bloom is not null ? "0x" + receipt.Bloom.ToString().ToLowerInvariant() : "0x" + new string('0', 512),
-            output = receipt.ReturnValue is not null ? "0x" + Convert.ToHexString(receipt.ReturnValue).ToLowerInvariant() : "0x",
             status = ToHex(receipt.StatusCode),
             txHash = CanonicalFormatHelpers.ToCanonicalHash(receipt.TxHash)
         };
@@ -424,7 +433,6 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
                 name = testName,
                 pass = pass,
                 fork = spec.Name ?? "unknown",
-                v = 1,
                 d = duration.HasValue ? Math.Round(duration.Value.TotalSeconds, 3) : (double?)null,
                 root = stateRoot is not null ? CanonicalFormatHelpers.ToCanonicalHash(stateRoot) : null
             }
@@ -501,7 +509,7 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
     /// <summary>
     /// Converts a UInt256 to hexadecimal string with 0x prefix.
     /// </summary>
-    private static string ToHex(UInt256 value) => $"0x{value:x}";
+    private static string ToHex(UInt256 value) => value.ToHexString(true);
 
     /// <summary>
     /// Converts a byte to hexadecimal string with 0x prefix.

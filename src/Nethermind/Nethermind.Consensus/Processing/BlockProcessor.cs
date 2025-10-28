@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -135,7 +136,7 @@ public partial class BlockProcessor(
         EmitValidationTracing(block, receipts, spec, blockTracer);
 
         // ===== FINALIZATION PHASE =====
-        // FIX 1 & 4: Calculate state root BEFORE EndBlockTrace
+        // Calculate state root BEFORE EndBlockTrace so it can be included in blockEnd record
         _stateProvider.Commit(spec, commitRoots: true);
 
         if (BlockchainProcessor.IsMainProcessingThread)
@@ -147,17 +148,19 @@ public partial class BlockProcessor(
         if (ShouldComputeStateRoot(header))
         {
             _stateProvider.RecalculateStateRoot();
-            header.StateRoot = _stateProvider.StateRoot;  // FIX 4: State root now available
+            header.StateRoot = _stateProvider.StateRoot;
         }
 
-        header.Hash = header.CalculateHash();
-
-        // FIX 1: END block trace AFTER validation and state root calculation
-        // At this point:
-        // - All postExecution records emitted
-        // - All validation records emitted
-        // - State root calculated and available in header
+        // CRITICAL: EndBlockTrace MUST be called before hash calculation!
+        // EndBlockTrace sets the block header Bloom filter by accumulating receipt blooms.
+        // Now that state root is set, we can finalize tracing with both values.
+        // If we call EndBlockTrace after hash calculation, the hash will be wrong!
         ReceiptsTracer.EndBlockTrace();
+
+        // Finalize block-level tracing now that both state root and bloom are set
+        FinalizeBlockTrace(blockTracer);
+
+        header.Hash = header.CalculateHash();
 
         return receipts;
     }
@@ -183,18 +186,9 @@ public partial class BlockProcessor(
         {
             long gasUsed = 0;
 
-            // Use blockTracer if available, otherwise fall back to NullTxTracer
-            ITxTracer txTracer = blockTracer is not null && blockTracer is not NullBlockTracer
-                ? blockTracer.StartNewTxTrace(null)
-                : NullTxTracer.Instance;
-
-            // Execute beacon root storage and capture actual gas used
-            gasUsed = beaconBlockRootHandler.StoreBeaconRootWithGas(block, spec, txTracer);
-
-            if (txTracer is not NullTxTracer)
-            {
-                blockTracer.EndTxTrace();
-            }
+            // FIX: Execute beacon root storage WITHOUT tx-level tracing to avoid state corruption
+            // The actual state changes should not be traced at transaction level
+            gasUsed = beaconBlockRootHandler.StoreBeaconRootWithGas(block, spec, NullTxTracer.Instance);
 
             // Emit block-level tracing for beacon root storage if tracer supports it
             if (blockTracer is not null && blockTracer is not NullBlockTracer && spec.IsBeaconBlockRootAvailable)
@@ -234,18 +228,9 @@ public partial class BlockProcessor(
         BlockHeader header = block.Header;
         long gasUsed = 0;
 
-        // Use blockTracer if available, otherwise fall back to NullTxTracer
-        ITxTracer txTracer = blockTracer is not null && blockTracer is not NullBlockTracer
-            ? blockTracer.StartNewTxTrace(null)
-            : NullTxTracer.Instance;
-
-        // Apply the actual state changes and capture gas used
-        gasUsed = blockHashStore.ApplyBlockhashStateChangesWithGas(header, spec, txTracer);
-
-        if (txTracer is not NullTxTracer)
-        {
-            blockTracer.EndTxTrace();
-        }
+        // FIX: Apply the actual state changes WITHOUT tx-level tracing to avoid state corruption
+        // The actual state changes should not be traced at transaction level
+        gasUsed = blockHashStore.ApplyBlockhashStateChangesWithGas(header, spec, NullTxTracer.Instance);
 
         // Emit block-level tracing for block hash storage if tracer supports it
         if (blockTracer is not null && blockTracer is not NullBlockTracer && spec.IsEip2935Enabled)
@@ -386,36 +371,61 @@ public partial class BlockProcessor(
         // Trace blob gas accounting if EIP-4844 is enabled
         if (spec.IsEip4844Enabled)
         {
-            var blobTxs = new System.Collections.Generic.List<Transaction>();
-            foreach (var tx in block.Transactions)
+            var blobTxsWithIndices = new System.Collections.Generic.List<(Transaction tx, int originalIndex)>();
+            for (int i = 0; i < block.Transactions.Length; i++)
             {
+                var tx = block.Transactions[i];
                 if (tx.Type == TxType.Blob)
                 {
-                    blobTxs.Add(tx);
+                    blobTxsWithIndices.Add((tx, i));
                 }
             }
 
-            if (blobTxs.Count > 0)
-            {
-                ulong excessBlobGas = header.ExcessBlobGas ?? 0;
-                UInt256 blobGasPrice = UInt256.One; // Simplified - would calculate from excess blob gas
+            ulong excessBlobGas = header.ExcessBlobGas ?? 0;
+            UInt256 blobGasPrice = UInt256.One; // Simplified - would calculate from excess blob gas
+            long maxBlobGasPerBlock = (long)(spec.MaxBlobCount * Nethermind.Core.Eip4844Constants.GasPerBlob);
+            bool blobGasValid = true;
+            long totalBlobGas = 0;
 
-                bool blobGasValid = true;
-                long totalBlobGas = 0;
-                foreach (var tx in blobTxs)
+            if (blobTxsWithIndices.Count > 0)
+            {
+                foreach (var (tx, _) in blobTxsWithIndices)
                 {
                     int blobCount = tx.BlobVersionedHashes?.Length ?? 0;
                     totalBlobGas += blobCount * 131072; // GAS_PER_BLOB
                 }
 
-                if (totalBlobGas > 786432) // MAX_BLOB_GAS_PER_BLOCK
+                if (totalBlobGas > maxBlobGasPerBlock)
                 {
                     blobGasValid = false;
                 }
-
-                gasValidator.TraceBlobGasAccounting(blobTxs.ToArray(), excessBlobGas, blobGasPrice, blobGasValid);
             }
+
+            var blobTxsArray = blobTxsWithIndices.Count > 0 ? blobTxsWithIndices.Select(x => x.tx).ToArray() : null;
+            var originalIndicesArray = blobTxsWithIndices.Count > 0 ? blobTxsWithIndices.Select(x => x.originalIndex).ToArray() : null;
+            gasValidator.TraceBlobGasAccounting(blobTxsArray, excessBlobGas, blobGasPrice, blobGasValid, maxBlobGasPerBlock, originalIndicesArray);
         }
+    }
+
+    private static void FinalizeBlockTrace(IBlockTracer blockTracer)
+    {
+        if (blockTracer is null || blockTracer is NullBlockTracer)
+        {
+            return;
+        }
+
+        // If the tracer is a BlockLevelJsonTracer, call FinalizeBlockTrace to write blockEnd
+        // with both state root and bloom filter set
+        if (blockTracer is Blockchain.Tracing.BlockLevel.BlockLevelJsonTracer jsonTracer)
+        {
+            jsonTracer.FinalizeBlockTrace();
+        }
+        else if (blockTracer is BlockReceiptsTracer receiptsTracer && receiptsTracer.WrappedBlockTracer is not null)
+        {
+            // The receipts tracer wraps another tracer - finalize that one
+            FinalizeBlockTrace(receiptsTracer.WrappedBlockTracer);
+        }
+        // Note: CompositeBlockTracer support could be added if needed by exposing _childTracers
     }
 
     private void StoreTxReceipts(Block block, TxReceipt[] txReceipts, IReleaseSpec spec)

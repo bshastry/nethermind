@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Nethermind.Core;
+using Nethermind.Core.Extensions;
 using Nethermind.Evm.Tracing;
 using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
@@ -93,15 +94,20 @@ public class TracingGasValidator
     /// <param name="excessBlobGas">Excess blob gas from parent block.</param>
     /// <param name="blobGasPrice">Calculated blob gas price.</param>
     /// <param name="isValid">Whether blob gas accounting is valid.</param>
+    /// <param name="maxBlobGasPerBlock">Maximum blob gas per block (fork-specific).</param>
+    /// <param name="originalIndices">Original transaction indices in the block (if different from array order).</param>
     public void TraceBlobGasAccounting(
         Transaction[]? blobTxs,
         ulong excessBlobGas,
         UInt256 blobGasPrice,
-        bool isValid)
+        bool isValid,
+        long? maxBlobGasPerBlock = null,
+        int[]? originalIndices = null)
     {
+        long maxBlobGas = maxBlobGasPerBlock ?? MaxBlobGasPerBlock;
         var operation = new BlobGasAccountingOperation
         {
-            MaxBlobGasPerBlock = $"0x{MaxBlobGasPerBlock:x}",
+            MaxBlobGasPerBlock = $"0x{maxBlobGas:x}",
             Valid = isValid,
             OverallResult = isValid ? "valid" : "invalid"
         };
@@ -125,6 +131,7 @@ public class TracingGasValidator
             for (int i = 0; i < blobTxs.Length; i++)
             {
                 var tx = blobTxs[i];
+                int txIndex = originalIndices is not null && i < originalIndices.Length ? originalIndices[i] : i;
 
                 // Get blob count from versioned hashes
                 int blobCount = tx.BlobVersionedHashes?.Length ?? 0;
@@ -133,7 +140,7 @@ public class TracingGasValidator
 
                 operation.Transactions.Add(new TransactionBlobGasAccounting
                 {
-                    TxIndex = $"0x{i:x}",
+                    TxIndex = $"0x{txIndex:x}",
                     BlobCount = $"0x{blobCount:x}",
                     BlobGasPerBlob = $"0x{GasPerBlob:x}",
                     BlobGasUsed = $"0x{txBlobGas:x}",
@@ -143,7 +150,7 @@ public class TracingGasValidator
         }
 
         operation.TotalBlobGasUsed = $"0x{cumulativeBlobGas:x}";
-        operation.BlobGasLimitExceeded = cumulativeBlobGas > MaxBlobGasPerBlock;
+        operation.BlobGasLimitExceeded = cumulativeBlobGas > maxBlobGas;
 
         _tracer.TraceValidation(operation);
     }
@@ -168,42 +175,16 @@ public class TracingGasValidator
 
         UInt256 output = 1;
         UInt256 denominator = (UInt256)BlobGasUpdateFraction;
+        UInt256 initialAccumulator = (UInt256)BlobGasPriceFactor * denominator;
 
         // Simplified calculation - in practice this would iterate
-        // For tracing purposes, we show the key iterations
+        // For tracing purposes, we show the initial state only (matches geth format)
         fakeExp.Iterations.Add(new FakeExponentialIteration
         {
             I = "0x0",
-            Accumulator = $"0x{output:x}",
+            Accumulator = initialAccumulator.ToHexString(true),
             Overflow = false
         });
-
-        // For actual calculation with excessBlobGas > 0:
-        if (excessBlobGas > 0)
-        {
-            // Simplified: output ≈ factor * (1 + excessBlobGas / denominator)
-            // This is a linear approximation for tracing
-            UInt256 numerator = (UInt256)excessBlobGas;
-
-            // Check for potential overflow
-            bool wouldOverflow = false;
-            try
-            {
-                output = BlobGasPriceFactor + (BlobGasPriceFactor * numerator / denominator);
-            }
-            catch (OverflowException)
-            {
-                wouldOverflow = true;
-                output = UInt256.MaxValue;
-            }
-
-            fakeExp.Iterations.Add(new FakeExponentialIteration
-            {
-                I = $"0x{excessBlobGas:x}",
-                Accumulator = $"0x{output:x}",
-                Overflow = wouldOverflow
-            });
-        }
 
         fakeExp.Result = $"0x{UInt256.Max(output, MinBlobGasPrice):x}";
 
@@ -241,14 +222,17 @@ public class TracingGasValidator
     /// <param name="blobTransactionData">List of (transaction, blobCount, blobGasUsed) tuples.</param>
     /// <param name="excessBlobGas">Excess blob gas from parent block.</param>
     /// <param name="isValid">Whether blob gas accounting is valid.</param>
+    /// <param name="maxBlobGasPerBlock">Maximum blob gas per block (fork-specific).</param>
     public void TraceBlobGasAccounting(
         IEnumerable<(Transaction tx, int blobCount, long blobGasUsed)>? blobTransactionData,
         ulong excessBlobGas,
-        bool isValid)
+        bool isValid,
+        long? maxBlobGasPerBlock = null)
     {
+        long maxBlobGas = maxBlobGasPerBlock ?? MaxBlobGasPerBlock;
         var operation = new BlobGasAccountingOperation
         {
-            MaxBlobGasPerBlock = $"0x{MaxBlobGasPerBlock:x}",
+            MaxBlobGasPerBlock = $"0x{maxBlobGas:x}",
             Valid = isValid,
             OverallResult = isValid ? "valid" : "invalid"
         };
@@ -288,7 +272,7 @@ public class TracingGasValidator
         }
 
         operation.TotalBlobGasUsed = $"0x{cumulativeBlobGas:x}";
-        operation.BlobGasLimitExceeded = cumulativeBlobGas > MaxBlobGasPerBlock;
+        operation.BlobGasLimitExceeded = cumulativeBlobGas > maxBlobGas;
 
         _tracer.TraceValidation(operation);
     }

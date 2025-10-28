@@ -212,6 +212,11 @@ public class BlockReceiptsTracer : IBlockTracer, ITxTracer, IJournal<int>, ITxTr
 
     public ITxTracer InnerTracer => _currentTxTracer;
 
+    /// <summary>
+    /// Gets the wrapped block tracer (if any) for delegating finalization operations.
+    /// </summary>
+    public IBlockTracer? WrappedBlockTracer => _otherTracer != NullBlockTracer.Instance ? _otherTracer : null;
+
     public int TakeSnapshot() => _txReceipts.Count;
 
     public void Restore(int snapshot)
@@ -265,17 +270,25 @@ public class BlockReceiptsTracer : IBlockTracer, ITxTracer, IJournal<int>, ITxTr
 
     public void EndBlockTrace()
     {
-        _otherTracer.EndBlockTrace();
+        // CRITICAL: Set bloom BEFORE calling downstream tracers!
+        // This ensures the bloom is available when FinalizeBlockTrace() is called.
+        // The bloom must be set before _otherTracer.EndBlockTrace() because:
+        // 1. Nested tracers may need access to the bloom value
+        // 2. FinalizeBlockTrace() may be called between nested EndBlockTrace() calls
         if (_txReceipts.Count > 0)
         {
             Bloom blockBloom = new();
             Block.Header.Bloom = blockBloom;
+
             for (int index = 0; index < _txReceipts.Count; index++)
             {
                 TxReceipt? receipt = _txReceipts[index];
                 blockBloom.Accumulate(receipt.Bloom!);
             }
         }
+
+        // Now propagate to downstream tracers with bloom already set
+        _otherTracer.EndBlockTrace();
     }
 
     public void SetOtherTracer(IBlockTracer blockTracer)

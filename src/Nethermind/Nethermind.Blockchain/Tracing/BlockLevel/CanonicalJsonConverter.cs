@@ -256,7 +256,7 @@ public static class CanonicalFormatHelpers
     /// </summary>
     public static string ToCanonicalHex(Int256.UInt256 value)
     {
-        return $"0x{value:x}";
+        return value.ToHexString(true);
     }
 
     /// <summary>
