@@ -3,6 +3,7 @@
 
 using Nethermind.Core;
 using Nethermind.Evm.Tracing;
+using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
 
 namespace Nethermind.Blockchain.Tracing;
@@ -15,4 +16,8 @@ public abstract class BlockTracer : IBlockTracer
     public abstract ITxTracer StartNewTxTrace(Transaction? tx);
     public virtual void EndTxTrace() { }
     public virtual void EndBlockTrace() { }
+    public virtual void TracePreExecution(PreExecutionOperation operation) { }
+    public virtual void TracePostExecution(PostExecutionOperation operation) { }
+    public virtual void TraceValidation(ValidationOperation operation) { }
+    public virtual void TraceTrieOperation(TrieOperation operation) { }
 }

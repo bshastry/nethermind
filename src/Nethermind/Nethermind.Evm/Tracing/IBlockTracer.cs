@@ -3,6 +3,7 @@
 
 using System.Collections.Generic;
 using Nethermind.Core;
+using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
 
 namespace Nethermind.Evm.Tracing
@@ -52,9 +53,47 @@ namespace Nethermind.Evm.Tracing
         void EndTxTrace();
 
         /// <summary>
+        /// Ends last transaction trace with receipt information for enhanced tracing.
+        /// </summary>
+        /// <param name="receipt">Transaction receipt containing execution results (may be null).</param>
+        void EndTxTrace(TxReceipt? receipt)
+        {
+            // Default implementation delegates to parameterless version
+            EndTxTrace();
+        }
+
+        /// <summary>
         /// Ends block trace <see cref="StartNewBlockTrace"/>.
         /// </summary>
         void EndBlockTrace();
+
+        /// <summary>
+        /// Traces a pre-execution operation (system call before regular transactions).
+        /// Examples: EIP-4788 beacon root storage, EIP-2935 block hash storage.
+        /// </summary>
+        /// <param name="operation">Pre-execution operation details.</param>
+        void TracePreExecution(PreExecutionOperation operation);
+
+        /// <summary>
+        /// Traces a post-execution operation (occurs after all transactions have executed).
+        /// Examples: EIP-4895 withdrawals, EIP-7685 execution requests, block rewards.
+        /// </summary>
+        /// <param name="operation">Post-execution operation details.</param>
+        void TracePostExecution(PostExecutionOperation operation);
+
+        /// <summary>
+        /// Traces a validation operation that verifies block correctness.
+        /// Examples: header validation, gas accounting, blob gas accounting.
+        /// </summary>
+        /// <param name="operation">Validation operation details.</param>
+        void TraceValidation(ValidationOperation operation);
+
+        /// <summary>
+        /// Traces a Merkle/Verkle trie computation.
+        /// Examples: state root calculation, receipt root, transaction root, withdrawals root.
+        /// </summary>
+        /// <param name="operation">Trie operation details.</param>
+        void TraceTrieOperation(TrieOperation operation);
     }
 
     public interface IBlockTracer<out TTrace> : IBlockTracer

@@ -6,6 +6,7 @@ using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Resettables;
 using Nethermind.Evm.Tracing;
+using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
 
 namespace Nethermind.Blockchain.Tracing;
@@ -62,7 +63,21 @@ public abstract class BlockTracerBase<TTrace, TTracer> : IBlockTracer<TTrace> wh
         CurrentTxTracer = null;
     }
 
+    public virtual void EndTxTrace(TxReceipt? receipt)
+    {
+        // Default implementation just calls regular EndTxTrace
+        EndTxTrace();
+    }
+
     public virtual void EndBlockTrace() { }
+
+    public virtual void TracePreExecution(PreExecutionOperation operation) { }
+
+    public virtual void TracePostExecution(PostExecutionOperation operation) { }
+
+    public virtual void TraceValidation(ValidationOperation operation) { }
+
+    public virtual void TraceTrieOperation(TrieOperation operation) { }
 
     protected virtual bool ShouldTraceTx(Transaction? tx) => _txHash is null || tx?.Hash == _txHash;
 

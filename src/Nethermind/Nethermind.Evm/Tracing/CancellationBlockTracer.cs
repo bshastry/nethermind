@@ -3,6 +3,7 @@
 
 using System.Threading;
 using Nethermind.Core;
+using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
 
 namespace Nethermind.Evm.Tracing
@@ -47,6 +48,30 @@ namespace Nethermind.Evm.Tracing
         public void EndBlockTrace()
         {
             innerTracer.EndBlockTrace();
+        }
+
+        public void TracePreExecution(PreExecutionOperation operation)
+        {
+            token.ThrowIfCancellationRequested();
+            innerTracer.TracePreExecution(operation);
+        }
+
+        public void TracePostExecution(PostExecutionOperation operation)
+        {
+            token.ThrowIfCancellationRequested();
+            innerTracer.TracePostExecution(operation);
+        }
+
+        public void TraceValidation(ValidationOperation operation)
+        {
+            token.ThrowIfCancellationRequested();
+            innerTracer.TraceValidation(operation);
+        }
+
+        public void TraceTrieOperation(TrieOperation operation)
+        {
+            token.ThrowIfCancellationRequested();
+            innerTracer.TraceTrieOperation(operation);
         }
     }
 }

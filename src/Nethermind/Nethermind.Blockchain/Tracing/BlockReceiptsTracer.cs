@@ -8,6 +8,7 @@ using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Evm;
 using Nethermind.Evm.Tracing;
+using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Evm.TransactionProcessing;
 using Nethermind.Int256;
 
@@ -75,12 +76,18 @@ public class BlockReceiptsTracer : IBlockTracer, ITxTracer, IJournal<int>, ITxTr
     protected virtual TxReceipt BuildReceipt(Address recipient, long spentGas, byte statusCode, LogEntry[] logEntries, Hash256? stateRoot)
     {
         Transaction transaction = CurrentTx!;
+
+        // Calculate cumulative gas used by adding current tx gas to previous total
+        long cumulativeGasUsed = _currentIndex > 0 && _txReceipts.Count > 0
+            ? _txReceipts[_currentIndex - 1].GasUsedTotal + spentGas
+            : spentGas;
+
         TxReceipt txReceipt = new()
         {
             Logs = logEntries,
             TxType = transaction.Type,
             // Bloom calculated in parallel with other receipts
-            GasUsedTotal = Block.GasUsed,
+            GasUsedTotal = cumulativeGasUsed,
             StatusCode = statusCode,
             Recipient = transaction.IsContractCreation ? null : recipient,
             BlockHash = Block.Hash,
@@ -240,7 +247,19 @@ public class BlockReceiptsTracer : IBlockTracer, ITxTracer, IJournal<int>, ITxTr
 
     public void EndTxTrace()
     {
-        _otherTracer.EndTxTrace();
+        // Get the last receipt that was just added by MarkAsSuccess/MarkAsFailed
+        TxReceipt? receipt = _txReceipts.Count > 0 ? _txReceipts[^1] : null;
+
+        // Pass receipt to downstream tracer
+        _otherTracer.EndTxTrace(receipt);
+
+        _currentIndex++;
+    }
+
+    // Also add the overload
+    public void EndTxTrace(TxReceipt? receipt)
+    {
+        _otherTracer.EndTxTrace(receipt);
         _currentIndex++;
     }
 
@@ -257,7 +276,6 @@ public class BlockReceiptsTracer : IBlockTracer, ITxTracer, IJournal<int>, ITxTr
                 blockBloom.Accumulate(receipt.Bloom!);
             }
         }
-        _otherTracer = NullBlockTracer.Instance;
     }
 
     public void SetOtherTracer(IBlockTracer blockTracer)
@@ -265,6 +283,18 @@ public class BlockReceiptsTracer : IBlockTracer, ITxTracer, IJournal<int>, ITxTr
         ArgumentNullException.ThrowIfNull(blockTracer);
         _otherTracer = blockTracer;
     }
+
+    public void TracePreExecution(PreExecutionOperation operation) =>
+        _otherTracer.TracePreExecution(operation);
+
+    public void TracePostExecution(PostExecutionOperation operation) =>
+        _otherTracer.TracePostExecution(operation);
+
+    public void TraceValidation(ValidationOperation operation) =>
+        _otherTracer.TraceValidation(operation);
+
+    public void TraceTrieOperation(TrieOperation operation) =>
+        _otherTracer.TraceTrieOperation(operation);
 
     public void Dispose()
     {

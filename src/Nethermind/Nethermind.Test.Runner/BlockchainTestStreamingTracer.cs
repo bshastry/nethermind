@@ -12,6 +12,7 @@ using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Specs;
 using Nethermind.Evm.Tracing;
+using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
 
 namespace Nethermind.Test.Runner;
@@ -194,6 +195,26 @@ public class BlockchainTestStreamingTracer(GethTraceOptions options, Stream? out
         writer.Flush();
 
         _output.Write(_newLine);
+    }
+
+    public void TracePreExecution(PreExecutionOperation operation)
+    {
+        // Not implemented in streaming tracer
+    }
+
+    public void TracePostExecution(PostExecutionOperation operation)
+    {
+        // Not implemented in streaming tracer
+    }
+
+    public void TraceValidation(ValidationOperation operation)
+    {
+        // Not implemented in streaming tracer
+    }
+
+    public void TraceTrieOperation(TrieOperation operation)
+    {
+        // Not implemented in streaming tracer
     }
 
     public void Dispose()

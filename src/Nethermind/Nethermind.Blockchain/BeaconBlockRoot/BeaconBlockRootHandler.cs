@@ -56,6 +56,11 @@ public class BeaconBlockRootHandler(ITransactionProcessor processor, IWorldState
 
     public void StoreBeaconRoot(Block block, IReleaseSpec spec, ITxTracer tracer)
     {
+        StoreBeaconRootWithGas(block, spec, tracer);
+    }
+
+    public long StoreBeaconRootWithGas(Block block, IReleaseSpec spec, ITxTracer tracer)
+    {
         (Address? toAddress, AccessList? accessList) = BeaconRootsAccessList(block, spec, includeStorageCells: false);
 
         if (toAddress is not null)
@@ -75,6 +80,11 @@ public class BeaconBlockRootHandler(ITransactionProcessor processor, IWorldState
             transaction.Hash = transaction.CalculateHash();
 
             processor.Execute(transaction, tracer);
+
+            // Return the actual gas used from the transaction execution
+            return transaction.SpentGas;
         }
+
+        return 0;
     }
 }

@@ -2,6 +2,7 @@
 // Licensed under the LGPL-3.0. For full terms, see LICENSE-LGPL in the project root.
 
 using Nethermind.Core;
+using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
 
 namespace Nethermind.Evm.Tracing;
@@ -34,4 +35,12 @@ public class FeesTracer : TxTracer, IBlockTracer
     public void EndTxTrace() { }
 
     public void EndBlockTrace() { }
+
+    public void TracePreExecution(PreExecutionOperation operation) { }
+
+    public void TracePostExecution(PostExecutionOperation operation) { }
+
+    public void TraceValidation(ValidationOperation operation) { }
+
+    public void TraceTrieOperation(TrieOperation operation) { }
 }

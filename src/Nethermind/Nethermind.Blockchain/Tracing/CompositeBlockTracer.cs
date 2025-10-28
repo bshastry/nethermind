@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Nethermind.Core;
 using Nethermind.Evm.Tracing;
+using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
 
 namespace Nethermind.Blockchain.Tracing;
@@ -92,6 +93,38 @@ public class CompositeBlockTracer : IBlockTracer, ITracerBag
     {
         _childTracers.Remove(tracer);
         IsTracingRewards = _childTracers.Any(static t => t.IsTracingRewards);
+    }
+
+    public void TracePreExecution(PreExecutionOperation operation)
+    {
+        for (int index = 0; index < _childTracers.Count; index++)
+        {
+            _childTracers[index].TracePreExecution(operation);
+        }
+    }
+
+    public void TracePostExecution(PostExecutionOperation operation)
+    {
+        for (int index = 0; index < _childTracers.Count; index++)
+        {
+            _childTracers[index].TracePostExecution(operation);
+        }
+    }
+
+    public void TraceValidation(ValidationOperation operation)
+    {
+        for (int index = 0; index < _childTracers.Count; index++)
+        {
+            _childTracers[index].TraceValidation(operation);
+        }
+    }
+
+    public void TraceTrieOperation(TrieOperation operation)
+    {
+        for (int index = 0; index < _childTracers.Count; index++)
+        {
+            _childTracers[index].TraceTrieOperation(operation);
+        }
     }
 
     public IBlockTracer GetTracer() =>

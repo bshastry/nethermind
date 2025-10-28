@@ -3,6 +3,7 @@
 
 using Nethermind.Core;
 using Nethermind.Evm.Tracing;
+using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
 
 namespace Evm.T8n;
@@ -39,4 +40,12 @@ public class StorageTxTracer : TxTracer, IBlockTracer
     public void EndTxTrace() { }
 
     public void EndBlockTrace() { }
+
+    public void TracePreExecution(PreExecutionOperation operation) { }
+
+    public void TracePostExecution(PostExecutionOperation operation) { }
+
+    public void TraceValidation(ValidationOperation operation) { }
+
+    public void TraceTrieOperation(TrieOperation operation) { }
 }

@@ -39,6 +39,9 @@ internal class Program
         public static Option<bool> ExcludeStack { get; } =
             new("--stack", "-s") { Description = "Exclude stack trace." };
 
+        public static Option<string?> TxTraceFile { get; } =
+            new("--tx-trace") { Description = "Enable transaction-level tracing. Specify output file path, 'stderr', '-', or omit for stderr. [Only for Block Test]" };
+
         public static Option<bool> Wait { get; } =
             new("--wait", "-w") { Description = "Wait for input after the test run." };
 
@@ -50,6 +53,12 @@ internal class Program
 
         public static Option<bool> EnableWarmup { get; } =
             new("--warmup", "-wu") { Description = "Enable warmup for benchmarking purposes." };
+
+        public static Option<string> BlockTraceFile { get; } =
+            new("--block-trace") { Description = "Enable block-level execution tracing. Specify output file path, 'stderr', or '-' for stderr output. If not specified with --block-trace-level, defaults to stderr. [Only for Block Test]" };
+
+        public static Option<string> BlockTraceLevel { get; } =
+            new("--block-trace-level") { Description = "Block trace level: minimal, standard, or full (default: full). [Only for Block Test]" };
     }
 
     public static async Task<int> Main(params string[] args)
@@ -64,10 +73,13 @@ internal class Program
             Options.TraceNever,
             Options.ExcludeMemory,
             Options.ExcludeStack,
+            Options.TxTraceFile,
             Options.Wait,
             Options.Stdin,
             Options.GnosisTest,
             Options.EnableWarmup,
+            Options.BlockTraceFile,
+            Options.BlockTraceLevel,
         ];
         rootCommand.SetAction(Run);
 
@@ -95,13 +107,27 @@ internal class Program
         {
             if (parseResult.GetValue(Options.BlockTest))
             {
+                // Determine TX trace destination
+                // Priority: --tx-trace flag, then fallback to --trace flag
+                string? txTraceFile = parseResult.GetValue(Options.TxTraceFile);
+                bool legacyTrace = parseResult.GetValue(Options.TraceAlways);
+
+                // For backwards compatibility: if --trace is set but --tx-trace is not, use stderr
+                if (string.IsNullOrEmpty(txTraceFile) && legacyTrace)
+                {
+                    txTraceFile = "stderr";
+                }
+
                 await RunBlockTest(input, source => new BlockchainTestsRunner(
                     source,
                     parseResult.GetValue(Options.Filter),
                     chainId,
-                    parseResult.GetValue(Options.TraceAlways),
+                    legacyTrace,
                     !parseResult.GetValue(Options.ExcludeMemory),
-                    parseResult.GetValue(Options.ExcludeStack)));
+                    parseResult.GetValue(Options.ExcludeStack),
+                    txTraceFile,
+                    parseResult.GetValue(Options.BlockTraceFile),
+                    parseResult.GetValue(Options.BlockTraceLevel)));
             }
             else if (parseResult.GetValue(Options.EofTest))
             {
