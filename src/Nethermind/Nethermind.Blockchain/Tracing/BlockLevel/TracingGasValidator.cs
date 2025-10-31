@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Nethermind.Core;
 using Nethermind.Core.Extensions;
+using Nethermind.Evm;
 using Nethermind.Evm.Tracing;
 using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
@@ -26,7 +27,6 @@ public class TracingGasValidator
     private const long MaxBlobGasPerBlock = 786432; // 6 * 2^17
     private const long MinBlobGasPrice = 1;
     private const long BlobGasPriceFactor = 1; // MIN_BASE_FEE_PER_BLOB_GAS
-    private const long BlobGasUpdateFraction = 3338477; // Denominator for fake exponential
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TracingGasValidator"/> class.
@@ -96,13 +96,15 @@ public class TracingGasValidator
     /// <param name="isValid">Whether blob gas accounting is valid.</param>
     /// <param name="maxBlobGasPerBlock">Maximum blob gas per block (fork-specific).</param>
     /// <param name="originalIndices">Original transaction indices in the block (if different from array order).</param>
+    /// <param name="blobGasPriceUpdateFraction">Blob gas price update fraction (fork-specific).</param>
     public void TraceBlobGasAccounting(
         Transaction[]? blobTxs,
         ulong excessBlobGas,
         UInt256 blobGasPrice,
         bool isValid,
         long? maxBlobGasPerBlock = null,
-        int[]? originalIndices = null)
+        int[]? originalIndices = null,
+        UInt256? blobGasPriceUpdateFraction = null)
     {
         long maxBlobGas = maxBlobGasPerBlock ?? MaxBlobGasPerBlock;
         var operation = new BlobGasAccountingOperation
@@ -113,7 +115,8 @@ public class TracingGasValidator
         };
 
         // Calculate blob gas price using fake exponential
-        var fakeExp = CalculateFakeExponential(excessBlobGas);
+        UInt256 updateFraction = blobGasPriceUpdateFraction ?? Eip4844Constants.DefaultBlobGasPriceUpdateFraction;
+        var fakeExp = CalculateFakeExponential(excessBlobGas, updateFraction);
 
         operation.BlobGasPriceCalculation = new BlobGasPriceCalculation
         {
@@ -159,34 +162,61 @@ public class TracingGasValidator
     /// Calculates the fake exponential for blob gas price.
     /// This is an integer approximation of: factor * e^(excess_blob_gas / BLOB_GAS_UPDATE_FRACTION)
     /// </summary>
-    private FakeExponential CalculateFakeExponential(ulong excessBlobGas)
+    private FakeExponential CalculateFakeExponential(ulong excessBlobGas, UInt256 updateFraction)
     {
         var fakeExp = new FakeExponential
         {
             Factor = $"0x{BlobGasPriceFactor:x}",
             Numerator = $"0x{excessBlobGas:x}",
-            Denominator = $"0x{BlobGasUpdateFraction:x}"
+            Denominator = updateFraction.ToHexString(true)
         };
 
-        // Calculate using integer arithmetic
-        // output = 1 * FEE_UPDATE_FRACTION
-        // for i in range(excess_blob_gas):
-        //     output = output * (FEE_UPDATE_FRACTION + 1) / FEE_UPDATE_FRACTION
+        // Calculate using integer arithmetic (Taylor expansion)
+        // output = factor * e^(numerator / denominator)
+        // Using Taylor series: sum from i=0 of (factor * numerator^i) / (denominator^i * i!)
 
-        UInt256 output = 1;
-        UInt256 denominator = (UInt256)BlobGasUpdateFraction;
-        UInt256 initialAccumulator = (UInt256)BlobGasPriceFactor * denominator;
+        UInt256 factor = (UInt256)BlobGasPriceFactor;
+        UInt256 numerator = (UInt256)excessBlobGas;
+        UInt256 denominator = updateFraction;
 
-        // Simplified calculation - in practice this would iterate
-        // For tracing purposes, we show the initial state only (matches geth format)
-        fakeExp.Iterations.Add(new FakeExponentialIteration
+        // Initialize accumulator = factor * denominator
+        UInt256 accumulator;
+        if (factor == UInt256.One)
         {
-            I = "0x0",
-            Accumulator = initialAccumulator.ToHexString(true),
-            Overflow = false
-        });
+            // Skip expensive 256bit multiplication if factor is 1
+            accumulator = denominator;
+        }
+        else
+        {
+            accumulator = factor * denominator;
+        }
 
-        fakeExp.Result = $"0x{UInt256.Max(output, MinBlobGasPrice):x}";
+        UInt256 output = UInt256.Zero;
+
+        // Iterate until accumulator becomes zero (convergence)
+        for (ulong i = 1; !accumulator.IsZero; i++)
+        {
+            // Add current term to output
+            output += accumulator;
+
+            // Record first iteration for tracing (matches geth format)
+            if (i == 1)
+            {
+                fakeExp.Iterations.Add(new FakeExponentialIteration
+                {
+                    I = "0x0",
+                    Accumulator = accumulator.ToHexString(true),
+                    Overflow = false
+                });
+            }
+
+            // Calculate next term: accumulator = (accumulator * numerator) / (denominator * i)
+            accumulator = accumulator * numerator / (denominator * i);
+        }
+
+        // Divide by denominator to get final result
+        UInt256 result = output / denominator;
+        fakeExp.Result = result.ToHexString(true);
 
         return fakeExp;
     }
@@ -223,11 +253,13 @@ public class TracingGasValidator
     /// <param name="excessBlobGas">Excess blob gas from parent block.</param>
     /// <param name="isValid">Whether blob gas accounting is valid.</param>
     /// <param name="maxBlobGasPerBlock">Maximum blob gas per block (fork-specific).</param>
+    /// <param name="blobGasPriceUpdateFraction">Blob gas price update fraction (fork-specific).</param>
     public void TraceBlobGasAccounting(
         IEnumerable<(Transaction tx, int blobCount, long blobGasUsed)>? blobTransactionData,
         ulong excessBlobGas,
         bool isValid,
-        long? maxBlobGasPerBlock = null)
+        long? maxBlobGasPerBlock = null,
+        UInt256? blobGasPriceUpdateFraction = null)
     {
         long maxBlobGas = maxBlobGasPerBlock ?? MaxBlobGasPerBlock;
         var operation = new BlobGasAccountingOperation
@@ -238,8 +270,9 @@ public class TracingGasValidator
         };
 
         // Calculate blob gas price
-        UInt256 blobGasPrice = CalculateBlobGasPrice(excessBlobGas);
-        var fakeExp = CalculateFakeExponential(excessBlobGas);
+        UInt256 updateFraction = blobGasPriceUpdateFraction ?? Eip4844Constants.DefaultBlobGasPriceUpdateFraction;
+        BlobGasCalculator.TryCalculateFeePerBlobGas(excessBlobGas, updateFraction, out UInt256 blobGasPrice);
+        var fakeExp = CalculateFakeExponential(excessBlobGas, updateFraction);
 
         operation.BlobGasPriceCalculation = new BlobGasPriceCalculation
         {
@@ -275,21 +308,5 @@ public class TracingGasValidator
         operation.BlobGasLimitExceeded = cumulativeBlobGas > maxBlobGas;
 
         _tracer.TraceValidation(operation);
-    }
-
-    /// <summary>
-    /// Calculates the blob gas price from excess blob gas.
-    /// </summary>
-    private UInt256 CalculateBlobGasPrice(ulong excessBlobGas)
-    {
-        if (excessBlobGas == 0)
-        {
-            return MinBlobGasPrice;
-        }
-
-        // Simplified calculation for tracing purposes
-        // Actual implementation would use the full fake exponential
-        UInt256 price = BlobGasPriceFactor + (BlobGasPriceFactor * (UInt256)excessBlobGas / (UInt256)BlobGasUpdateFraction);
-        return UInt256.Max(price, MinBlobGasPrice);
     }
 }

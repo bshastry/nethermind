@@ -407,7 +407,7 @@ public partial class BlockProcessor(
             }
 
             ulong excessBlobGas = header.ExcessBlobGas ?? 0;
-            UInt256 blobGasPrice = UInt256.One; // Simplified - would calculate from excess blob gas
+            BlobGasCalculator.TryCalculateFeePerBlobGas(excessBlobGas, spec.BlobBaseFeeUpdateFraction, out UInt256 blobGasPrice);
             long maxBlobGasPerBlock = (long)(spec.MaxBlobCount * Nethermind.Core.Eip4844Constants.GasPerBlob);
             bool blobGasValid = true;
             long totalBlobGas = 0;
@@ -428,7 +428,7 @@ public partial class BlockProcessor(
 
             var blobTxsArray = blobTxsWithIndices.Count > 0 ? blobTxsWithIndices.Select(x => x.tx).ToArray() : null;
             var originalIndicesArray = blobTxsWithIndices.Count > 0 ? blobTxsWithIndices.Select(x => x.originalIndex).ToArray() : null;
-            gasValidator.TraceBlobGasAccounting(blobTxsArray, excessBlobGas, blobGasPrice, blobGasValid, maxBlobGasPerBlock, originalIndicesArray);
+            gasValidator.TraceBlobGasAccounting(blobTxsArray, excessBlobGas, blobGasPrice, blobGasValid, maxBlobGasPerBlock, originalIndicesArray, spec.BlobBaseFeeUpdateFraction);
         }
     }
 

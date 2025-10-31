@@ -59,11 +59,10 @@ public class BlockhashStore : IBlockhashStore
         // This matches geth's approach of executing EIP-2935 as a system call
         if (transactionProcessor is not null)
         {
-            Hash256 parentBlockHash = blockHeader.ParentHash;
             Transaction transaction = new()
             {
                 Value = UInt256.Zero,
-                Data = parentBlockHash.Bytes.ToArray(),
+                Data = blockHeader.ParentHash.Bytes.ToArray(),
                 To = eip2935Account,
                 SenderAddress = Address.SystemUser,
                 GasLimit = GasLimit,
@@ -80,10 +79,9 @@ public class BlockhashStore : IBlockhashStore
 
         // Fallback to direct storage write if no transaction processor available
         // This maintains backward compatibility but won't measure gas accurately
-        Hash256 parentBlockHash = blockHeader.ParentHash;
         UInt256 parentBlockIndex = new UInt256((ulong)((blockHeader.Number - 1) % spec.Eip2935RingBufferSize));
         StorageCell blockHashStoreCell = new(eip2935Account, parentBlockIndex);
-        worldState.Set(blockHashStoreCell, parentBlockHash!.Bytes.WithoutLeadingZeros().ToArray());
+        worldState.Set(blockHashStoreCell, blockHeader.ParentHash!.Bytes.WithoutLeadingZeros().ToArray());
         return 0;
     }
 
