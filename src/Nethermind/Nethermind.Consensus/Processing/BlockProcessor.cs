@@ -259,7 +259,27 @@ public partial class BlockProcessor(
 
     private void ProcessWithdrawalsWithTracing(Block block, IReleaseSpec spec, IBlockTracer blockTracer)
     {
-        // Apply actual withdrawals
+        // Track which accounts don't exist before withdrawal processing (for accountsCreated count)
+        var accountExistenceBeforeWithdrawals = new System.Collections.Generic.Dictionary<Address, bool>();
+        var balancesBeforeWithdrawals = new System.Collections.Generic.Dictionary<Address, UInt256>();
+
+        if (blockTracer is not null && blockTracer is not NullBlockTracer && spec.WithdrawalsEnabled)
+        {
+            if (block.Withdrawals is not null && block.Withdrawals.Length > 0)
+            {
+                // Capture account existence and balances BEFORE applying withdrawals
+                foreach (var withdrawal in block.Withdrawals)
+                {
+                    if (withdrawal is not null)
+                    {
+                        accountExistenceBeforeWithdrawals[withdrawal.Address] = _stateProvider.AccountExists(withdrawal.Address);
+                        balancesBeforeWithdrawals[withdrawal.Address] = _stateProvider.GetBalance(withdrawal.Address);
+                    }
+                }
+            }
+        }
+
+        // Apply actual withdrawals (this may create new accounts)
         withdrawalProcessor.ProcessWithdrawals(block, spec);
 
         // Emit block-level tracing for withdrawals if tracer supports it
@@ -271,25 +291,30 @@ public partial class BlockProcessor(
 
                 // Collect balance changes for each withdrawal
                 var balanceChanges = new System.Collections.Generic.Dictionary<Address, (UInt256 before, UInt256 after)>();
+                int accountsCreated = 0;
+                int emptyAccountsDeleted = 0;
 
                 foreach (var withdrawal in block.Withdrawals)
                 {
                     if (withdrawal is not null)
                     {
-                        // Get current balance (after withdrawal has been applied)
-                        UInt256 afterBalance = _stateProvider.GetBalance(withdrawal.Address);
-                        // Calculate balance before (current balance - withdrawal amount)
-                        UInt256 beforeBalance = afterBalance >= withdrawal.AmountInWei
-                            ? afterBalance - withdrawal.AmountInWei
+                        // Get balance before (captured before withdrawal processing)
+                        UInt256 beforeBalance = balancesBeforeWithdrawals.TryGetValue(withdrawal.Address, out UInt256 before)
+                            ? before
                             : UInt256.Zero;
 
+                        // Get current balance (after withdrawal has been applied)
+                        UInt256 afterBalance = _stateProvider.GetBalance(withdrawal.Address);
+
                         balanceChanges[withdrawal.Address] = (beforeBalance, afterBalance);
+
+                        // Count newly created accounts
+                        if (accountExistenceBeforeWithdrawals.TryGetValue(withdrawal.Address, out bool existedBefore) && !existedBefore)
+                        {
+                            accountsCreated++;
+                        }
                     }
                 }
-
-                // Count accounts created (simplified - would need to track actual creation)
-                int accountsCreated = 0;
-                int emptyAccountsDeleted = 0;
 
                 tracingProcessor.TraceWithdrawals(block.Withdrawals, balanceChanges, accountsCreated, emptyAccountsDeleted);
             }

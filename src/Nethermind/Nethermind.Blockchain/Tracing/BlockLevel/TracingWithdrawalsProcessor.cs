@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using Nethermind.Core;
+using Nethermind.Core.Extensions;
 using Nethermind.Evm.Tracing;
 using Nethermind.Evm.Tracing.BlockOperations;
 using Nethermind.Int256;
@@ -29,13 +30,13 @@ public class TracingWithdrawalsProcessor
     }
 
     /// <summary>
-    /// Traces withdrawal operations showing the full details of each withdrawal including
-    /// Gwei to Wei conversion (multiply by 10^9) and resulting balance changes.
+    /// Traces withdrawal operations per EIP-4895 showing validator withdrawals with balance changes.
+    /// Outputs amounts in Gwei (as specified in the withdrawal), while balance changes are in Wei.
     /// </summary>
-    /// <param name="withdrawals">Array of withdrawals to process.</param>
-    /// <param name="balanceChanges">Dictionary mapping addresses to (before, after) balance tuples.</param>
-    /// <param name="accountsCreated">Number of new accounts created for withdrawals.</param>
-    /// <param name="emptyAccountsDeleted">Number of empty accounts deleted per EIP-161.</param>
+    /// <param name="withdrawals">Array of withdrawals to process</param>
+    /// <param name="balanceChanges">Dictionary mapping addresses to (before, after) balance tuples in Wei</param>
+    /// <param name="accountsCreated">Number of new accounts created for withdrawals</param>
+    /// <param name="emptyAccountsDeleted">Number of empty accounts deleted per EIP-161</param>
     public void TraceWithdrawals(
         Withdrawal[]? withdrawals,
         Dictionary<Address, (UInt256 before, UInt256 after)>? balanceChanges,
@@ -53,8 +54,7 @@ public class TracingWithdrawalsProcessor
             EmptyAccountsDeleted = $"0x{emptyAccountsDeleted:x}"
         };
 
-        UInt256 totalWithdrawn = UInt256.Zero;
-        const ulong gweiToWei = 1_000_000_000; // 10^9
+        ulong totalWithdrawnGwei = 0;
 
         foreach (var withdrawal in withdrawals)
         {
@@ -65,16 +65,14 @@ public class TracingWithdrawalsProcessor
 
             // Calculate amount in Wei (Gwei * 10^9)
             UInt256 amountInWei = withdrawal.AmountInWei;
-            totalWithdrawn += amountInWei;
+            totalWithdrawnGwei += withdrawal.AmountInGwei;
 
             var withdrawalDetail = new WithdrawalDetail
             {
                 Index = $"0x{withdrawal.Index:x}",
                 ValidatorIndex = $"0x{withdrawal.ValidatorIndex:x}",
-                Address = withdrawal.Address,
-                AmountGwei = $"0x{withdrawal.AmountInGwei:x}",
-                AmountWei = $"0x{amountInWei:x}",
-                GweiToWei = $"0x{gweiToWei:x}"
+                Address = withdrawal.Address.ToString(withEip55Checksum: false),
+                AmountGwei = $"0x{withdrawal.AmountInGwei:x}"
             };
 
             // Add balance change if available
@@ -82,9 +80,9 @@ public class TracingWithdrawalsProcessor
             {
                 withdrawalDetail.BalanceChange = new BalanceChange
                 {
-                    Before = $"0x{balanceChange.before:x}",
-                    After = $"0x{balanceChange.after:x}",
-                    Delta = $"0x{amountInWei:x}"
+                    Before = balanceChange.before.ToHexString(true),
+                    After = balanceChange.after.ToHexString(true),
+                    Delta = amountInWei.ToHexString(true)
                 };
             }
             else
@@ -93,15 +91,15 @@ public class TracingWithdrawalsProcessor
                 withdrawalDetail.BalanceChange = new BalanceChange
                 {
                     Before = "0x0",
-                    After = $"0x{amountInWei:x}",
-                    Delta = $"0x{amountInWei:x}"
+                    After = amountInWei.ToHexString(true),
+                    Delta = amountInWei.ToHexString(true)
                 };
             }
 
             operation.Withdrawals.Add(withdrawalDetail);
         }
 
-        operation.TotalWithdrawn = $"0x{totalWithdrawn:x}";
+        operation.TotalWithdrawn = $"0x{totalWithdrawnGwei:x}";
 
         _tracer.TracePostExecution(operation);
     }

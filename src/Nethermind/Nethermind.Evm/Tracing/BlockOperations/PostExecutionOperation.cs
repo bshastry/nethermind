@@ -35,7 +35,7 @@ public class WithdrawalsOperation : PostExecutionOperation
     public List<WithdrawalDetail> Withdrawals { get; set; } = new();
 
     /// <summary>
-    /// Total amount withdrawn in Wei (hexadecimal)
+    /// Total amount withdrawn in Gwei (hexadecimal) - sum of all amountGwei fields
     /// </summary>
     public string TotalWithdrawn { get; set; } = "0x0";
 
@@ -72,24 +72,14 @@ public class WithdrawalDetail
     public string ValidatorIndex { get; set; } = string.Empty;
 
     /// <summary>
-    /// Withdrawal recipient address
+    /// Withdrawal recipient address (EIP-55 checksum format)
     /// </summary>
-    public Address? Address { get; set; }
+    public string Address { get; set; } = string.Empty;
 
     /// <summary>
     /// Withdrawal amount in Gwei (hexadecimal)
     /// </summary>
     public string AmountGwei { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Withdrawal amount in Wei (hexadecimal)
-    /// </summary>
-    public string AmountWei { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Conversion factor from Gwei to Wei (10^9 in hexadecimal)
-    /// </summary>
-    public string GweiToWei { get; set; } = "0x3b9aca00";
 
     /// <summary>
     /// Balance change information for the withdrawal recipient

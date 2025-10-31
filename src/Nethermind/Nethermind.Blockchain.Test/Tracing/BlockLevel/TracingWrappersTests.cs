@@ -212,14 +212,14 @@ public class TracingWrappersTests
             Build.A.Withdrawal
                 .WithIndex(0)
                 .WithValidatorIndex(12345)
-                .WithAddress(TestItem.AddressA)
-                .WithAmountInGwei(1000000)
+                .WithRecipient(TestItem.AddressA)
+                .WithAmount(1000000)
                 .TestObject,
             Build.A.Withdrawal
                 .WithIndex(1)
                 .WithValidatorIndex(67890)
-                .WithAddress(TestItem.AddressB)
-                .WithAmountInGwei(2000000)
+                .WithRecipient(TestItem.AddressB)
+                .WithAmount(2000000)
                 .TestObject
         };
 
@@ -242,33 +242,30 @@ public class TracingWrappersTests
     }
 
     [Test]
-    public void TracingWithdrawalsProcessor_should_convert_gwei_to_wei()
+    public void TracingWithdrawalsProcessor_should_use_canonical_format()
     {
         // Arrange
         var tracer = Substitute.For<IBlockTracer>();
         var processor = new TracingWithdrawalsProcessor(tracer);
 
         ulong amountInGwei = 1000;
-        UInt256 expectedAmountInWei = (UInt256)amountInGwei * 1_000_000_000;
 
         var withdrawals = new[]
         {
             Build.A.Withdrawal
                 .WithIndex(0)
                 .WithValidatorIndex(100)
-                .WithAddress(TestItem.AddressA)
-                .WithAmountInGwei(amountInGwei)
+                .WithRecipient(TestItem.AddressA)
+                .WithAmount(amountInGwei)
                 .TestObject
         };
 
         // Act
         processor.TraceWithdrawals(withdrawals, null, 0, 0);
 
-        // Assert
+        // Assert - Canonical format uses only AmountGwei (not AmountWei or GweiToWei)
         tracer.Received(1).TracePostExecution(Arg.Is<WithdrawalsOperation>(op =>
-            op.Withdrawals[0].AmountGwei == $"0x{amountInGwei:x}" &&
-            op.Withdrawals[0].AmountWei == $"0x{expectedAmountInWei:x}" &&
-            op.Withdrawals[0].GweiToWei == "0x3b9aca00" // 1_000_000_000
+            op.Withdrawals[0].AmountGwei == $"0x{amountInGwei:x}"
         ));
     }
 
@@ -281,19 +278,19 @@ public class TracingWrappersTests
 
         var withdrawals = new[]
         {
-            Build.A.Withdrawal.WithAmountInGwei(1000).TestObject,
-            Build.A.Withdrawal.WithAmountInGwei(2000).TestObject,
-            Build.A.Withdrawal.WithAmountInGwei(3000).TestObject
+            Build.A.Withdrawal.WithAmount(1000).TestObject,
+            Build.A.Withdrawal.WithAmount(2000).TestObject,
+            Build.A.Withdrawal.WithAmount(3000).TestObject
         };
 
-        UInt256 expectedTotal = ((UInt256)6000) * 1_000_000_000;
+        ulong expectedTotalGwei = 6000;
 
         // Act
         processor.TraceWithdrawals(withdrawals, null, 0, 0);
 
-        // Assert
+        // Assert - TotalWithdrawn is in Gwei (canonical format)
         tracer.Received(1).TracePostExecution(Arg.Is<WithdrawalsOperation>(op =>
-            op.TotalWithdrawn == $"0x{expectedTotal:x}"
+            op.TotalWithdrawn == $"0x{expectedTotalGwei:x}"
         ));
     }
 
@@ -333,8 +330,8 @@ public class TracingWrappersTests
         var processor = new TracingWithdrawalsProcessor(tracer);
 
         var withdrawal = Build.A.Withdrawal
-            .WithAddress(TestItem.AddressA)
-            .WithAmountInGwei(1000)
+            .WithRecipient(TestItem.AddressA)
+            .WithAmount(1000)
             .TestObject;
 
         UInt256 balanceBefore = 100;
@@ -613,12 +610,12 @@ public class TracingWrappersTests
         var parent = Build.A.BlockHeader
             .WithGasLimit(30000000)
             .WithGasUsed(15000000)
-            .WithBaseFeePerGas(1000000000)
+            .WithBaseFee(1000000000)
             .TestObject;
 
         var header = Build.A.BlockHeader
             .WithGasLimit(30000000)
-            .WithBaseFeePerGas(1000000000) // Same as parent (gas used = target)
+            .WithBaseFee(1000000000) // Same as parent (gas used = target)
             .TestObject;
 
         // Act
@@ -744,7 +741,7 @@ public class TracingWrappersTests
 
         var blobTx = Build.A.Transaction
             .WithType(TxType.Blob)
-            .WithBlobVersionedHashes(new[] { Keccak.Zero, Keccak.Zero }) // 2 blobs
+            .WithBlobVersionedHashes(2) // 2 blobs
             .TestObject;
 
         // Act
