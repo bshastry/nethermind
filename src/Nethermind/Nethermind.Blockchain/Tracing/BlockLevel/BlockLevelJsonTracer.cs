@@ -424,19 +424,42 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
     /// <param name="spec">The fork specification used for the test</param>
     /// <param name="duration">Optional test execution duration</param>
     /// <param name="stateRoot">Optional final state root hash</param>
-    public void WriteTestEndMarker(string testName, bool pass, IReleaseSpec spec, TimeSpan? duration, Hash256? stateRoot)
+    /// <param name="error">Optional error message if test failed due to validation error</param>
+    public void WriteTestEndMarker(string testName, bool pass, IReleaseSpec spec, TimeSpan? duration, Hash256? stateRoot, string? error = null, ErrorDetails? errorDetails = null, long? lastValidBlock = null)
     {
-        var endMarker = new
+        // Use SortedDictionary for alphabetical key ordering
+        var testEndObj = new SortedDictionary<string, object?>();
+
+        // Add fields in alphabetical order for standardization
+
+        // 1. d (duration - optional)
+        if (duration.HasValue)
+            testEndObj["d"] = Math.Round(duration.Value.TotalSeconds, 3);
+
+        // 2. error (simple error code string for geth compatibility)
+        if (errorDetails is not null)
         {
-            testEnd = new
-            {
-                name = testName,
-                pass = pass,
-                fork = spec.Name ?? "unknown",
-                d = duration.HasValue ? Math.Round(duration.Value.TotalSeconds, 3) : (double?)null,
-                root = stateRoot is not null ? CanonicalFormatHelpers.ToCanonicalHash(stateRoot) : null
-            }
-        };
+            testEndObj["error"] = errorDetails.Code;
+        }
+
+        // 3. fork (required)
+        testEndObj["fork"] = spec.Name ?? "unknown";
+
+        // 4. lastValidBlock (optional - last successfully validated block index)
+        if (lastValidBlock.HasValue)
+            testEndObj["lastValidBlock"] = lastValidBlock.Value;
+
+        // 5. lastValidStateRoot (optional - final state root or last valid state)
+        if (stateRoot is not null)
+            testEndObj["lastValidStateRoot"] = CanonicalFormatHelpers.ToCanonicalHash(stateRoot);
+
+        // 6. name (required)
+        testEndObj["name"] = testName;
+
+        // 7. pass (required)
+        testEndObj["pass"] = pass;
+
+        var endMarker = new { testEnd = testEndObj };
 
         WriteJsonLine(endMarker);
     }

@@ -11,9 +11,9 @@ namespace Nethermind.Logging
         public static readonly TestLogManager Instance = new TestLogManager();
         private readonly NUnitLogger _logger;
 
-        public TestLogManager(LogLevel level = LogLevel.Warn)
+        public TestLogManager(LogLevel level = LogLevel.Warn, bool useStdout = false)
         {
-            _logger = new NUnitLogger(level);
+            _logger = new NUnitLogger(level, useStdout);
         }
 
         public ILogger GetClassLogger<T>() => GetClassLogger();
@@ -22,8 +22,17 @@ namespace Nethermind.Logging
 
         public ILogger GetLogger(string loggerName) => GetClassLogger();
 
-        private class NUnitLogger(LogLevel level) : InterfaceLogger
+        private class NUnitLogger : InterfaceLogger
         {
+            private readonly LogLevel _level;
+            private readonly bool _useStdout;
+
+            public NUnitLogger(LogLevel level, bool useStdout = false)
+            {
+                _level = level;
+                _useStdout = useStdout;
+            }
+
             public void Info(string text)
             {
                 if (IsInfo)
@@ -70,15 +79,17 @@ namespace Nethermind.Logging
             public bool IsTrace => CheckLevel(LogLevel.Trace);
             public bool IsError => CheckLevel(LogLevel.Error);
 
-            private bool CheckLevel(LogLevel logLevel) => level >= logLevel;
+            private bool CheckLevel(LogLevel logLevel) => _level >= logLevel;
 
-            private static void Log(string text, Exception ex = null)
+            private void Log(string text, Exception ex = null)
             {
-                Console.Error.WriteLine(text);
+                // When tracing, write logs to stdout to avoid polluting stderr trace output
+                var output = _useStdout ? Console.Out : Console.Error;
+                output.WriteLine(text);
 
                 if (ex is not null)
                 {
-                    Console.Error.WriteLine(ex.ToString());
+                    output.WriteLine(ex.ToString());
                 }
             }
         }

@@ -128,10 +128,15 @@ public abstract class BlockchainTestBase
 
         IConfigProvider configProvider = new ConfigProvider();
         // configProvider.GetConfig<IBlocksConfig>().PreWarmStateOnBlockProcessing = false;
+        // When tracing, redirect logs to stdout to avoid polluting stderr (where JSON traces go)
+        ILogManager logManager = tracer is not null
+            ? new TestLogManager(LogLevel.Warn, useStdout: true)
+            : _logManager;
+
         ContainerBuilder containerBuilder = new ContainerBuilder()
             .AddModule(new TestNethermindModule(configProvider))
             .AddSingleton(specProvider)
-            .AddSingleton(_logManager)
+            .AddSingleton(logManager)
             .AddSingleton(rewardCalculator)
             .AddSingleton<IDifficultyCalculator>(DifficultyCalculator);
 
@@ -198,10 +203,12 @@ public abstract class BlockchainTestBase
                 genesisBlock.DisposeAccountChanges();
             }
 
+            string? validationError = null;
+            long lastValidBlockIndex = 0;
             if (test.Blocks is not null)
             {
                 // blockchain test
-                parentHeader = SuggestBlocks(test, failOnInvalidRlp, blockValidator, blockTree, parentHeader);
+                (parentHeader, validationError, lastValidBlockIndex) = SuggestBlocks(test, failOnInvalidRlp, blockValidator, blockTree, parentHeader);
             }
             else if (test.EngineNewPayloads is not null)
             {
@@ -232,23 +239,49 @@ public abstract class BlockchainTestBase
                 return new EthereumTestResult(test.Name, null, false);
             }
 
-            List<string> differences;
-            using (stateProvider.BeginScope(headBlock.Header))
+            List<string> differences = new();
+
+            // Only run state assertions if there was no validation error
+            // (invalid blocks cause different final state than expected)
+            if (validationError is null)
             {
-                differences = RunAssertions(test, headBlock, stateProvider);
+                using (stateProvider.BeginScope(headBlock.Header))
+                {
+                    differences = RunAssertions(test, headBlock, stateProvider);
+                }
             }
 
-            bool testPassed = differences.Count == 0;
+            bool testPassed = differences.Count == 0 && validationError is null;
 
             // Write test end marker if using streaming tracer (JSONL format)
             // This must be done BEFORE removing tracer and BEFORE Assert to ensure marker is written even on failure
             if (tracer is not null)
             {
-                tracer.TestFinished(test.Name, testPassed, test.Network, stopwatch?.Elapsed, headBlock?.StateRoot);
+                // Map error to EEST canonical format
+                ErrorDetails? errorDetails = null;
+                if (validationError is not null)
+                {
+                    errorDetails = EestErrorMapper.MapErrorToEEST(validationError);
+                }
+
+                tracer.TestFinished(
+                    test.Name,
+                    testPassed,
+                    test.Network,
+                    stopwatch?.Elapsed,
+                    headBlock?.StateRoot,
+                    validationError,
+                    errorDetails,
+                    testPassed ? null : lastValidBlockIndex);
                 blockchainProcessor.Tracers.Remove(tracer);
             }
 
-            Assert.That(differences, Is.Empty, "differences");
+            // Only assert on state differences if there was no validation error
+            if (validationError is null)
+            {
+                Assert.That(differences, Is.Empty, "differences");
+            }
+
             return new EthereumTestResult(test.Name, null, testPassed);
         }
         catch (Exception)
@@ -258,7 +291,7 @@ public abstract class BlockchainTestBase
         }
     }
 
-    private static BlockHeader SuggestBlocks(BlockchainTest test, bool failOnInvalidRlp, IBlockValidator blockValidator, IBlockTree blockTree, BlockHeader parentHeader)
+    private static (BlockHeader parentHeader, string? error, long lastValidBlock) SuggestBlocks(BlockchainTest test, bool failOnInvalidRlp, IBlockValidator blockValidator, IBlockTree blockTree, BlockHeader parentHeader)
     {
         List<(Block Block, string ExpectedException)> correctRlp = DecodeRlps(test, failOnInvalidRlp);
         for (int i = 0; i < correctRlp.Count; i++)
@@ -267,26 +300,52 @@ public abstract class BlockchainTestBase
             correctRlp[i].Block.Header.IsPostMerge = correctRlp[i].Block.Difficulty == 0;
 
             // For tests with reorgs, find the actual parent header from block tree
-            parentHeader = blockTree.FindHeader(correctRlp[i].Block.ParentHash) ?? parentHeader;
+            BlockHeader currentParentHeader = blockTree.FindHeader(correctRlp[i].Block.ParentHash) ?? parentHeader;
 
             Assert.That(correctRlp[i].Block.Hash, Is.Not.Null, $"null hash in {test.Name} block {i}");
 
             bool expectsException = correctRlp[i].ExpectedException is not null;
             // Validate block structure first (mimics SyncServer validation)
-            if (blockValidator.ValidateSuggestedBlock(correctRlp[i].Block, parentHeader, out string? validationError))
+            if (blockValidator.ValidateSuggestedBlock(correctRlp[i].Block, currentParentHeader, out string? validationError))
             {
-                Assert.That(!expectsException, $"Expected block {correctRlp[i].Block.Hash} to fail with '{correctRlp[i].ExpectedException}', but it passed validation");
                 try
                 {
                     // All validations passed, suggest the block
                     blockTree.SuggestBlock(correctRlp[i].Block);
-
+                    // Only update parent header if block was successfully added
+                    parentHeader = correctRlp[i].Block.Header;
+					if (expectsException)
+					{
+                        // Block succeeded but should have failed - report the expected exception
+                        string expectedError = correctRlp[i].ExpectedException!;
+                        ErrorDetails expectedDetails = EestErrorMapper.MapErrorToEEST(expectedError);
+						return (parentHeader,
+                            $"block (index {i}) insertion should have failed due to: {expectedDetails.Code}",
+                            parentHeader.Number);
+					}
                 }
                 catch (InvalidBlockException e)
                 {
                     // Exception thrown during block processing
-                    Assert.That(expectsException, $"Unexpected invalid block {correctRlp[i].Block.Hash}: {validationError}, Exception: {e}");
-                    // else: Expected to fail and did fail via exception → this is correct behavior
+                    if (!expectsException)
+                    {
+                        return (parentHeader, $"block #" + correctRlp[i].Block.Number + " insertion into chain failed: " + e.Message, parentHeader.Number);
+                    }
+                    else
+                    {
+                        // Expected to fail - verify the exception matches
+                        string expectedError = correctRlp[i].ExpectedException!;
+                        ErrorDetails expectedDetails = EestErrorMapper.MapErrorToEEST(expectedError);
+                        ErrorDetails actualDetails = EestErrorMapper.MapErrorToEEST(e.Message);
+
+                        if (expectedDetails.Code != actualDetails.Code)
+                        {
+                            return (parentHeader,
+                                $"block #{correctRlp[i].Block.Number} failed with wrong exception. Expected: {expectedDetails.Code}, Actual: {actualDetails.Code} (raw: {e.Message})",
+                                parentHeader.Number);
+                        }
+                        // else: Expected exception matches actual exception → correct behavior
+                    }
                 }
                 catch (Exception e)
                 {
@@ -301,13 +360,28 @@ public abstract class BlockchainTestBase
             else
             {
                 // Validation FAILED
-                Assert.That(expectsException, $"Unexpected invalid block {correctRlp[i].Block.Hash}: {validationError}");
-                // else: Expected to fail and did fail → this is correct behavior
-            }
+                if (!expectsException)
+                {
+                    return (parentHeader, $"block #" + correctRlp[i].Block.Number + " insertion into chain failed: " + validationError, parentHeader.Number);
+                }
+                else
+                {
+                    // Expected to fail - verify the exception matches
+                    string expectedError = correctRlp[i].ExpectedException!;
+                    ErrorDetails expectedDetails = EestErrorMapper.MapErrorToEEST(expectedError);
+                    ErrorDetails actualDetails = EestErrorMapper.MapErrorToEEST(validationError!);
 
-            parentHeader = correctRlp[i].Block.Header;
+                    if (expectedDetails.Code != actualDetails.Code)
+                    {
+                        return (parentHeader,
+                            $"block #{correctRlp[i].Block.Number} failed with wrong exception. Expected: {expectedDetails.Code}, Actual: {actualDetails.Code} (raw: {validationError})",
+                            parentHeader.Number);
+                    }
+                    // else: Expected exception matches actual exception → correct behavior
+                }
+            }
         }
-        return parentHeader;
+        return (parentHeader, null, parentHeader.Number);
     }
 
     private async static Task RunNewPayloads(TestEngineNewPayloadsJson[]? newPayloads, IEngineRpcModule engineRpcModule)
@@ -353,17 +427,21 @@ public abstract class BlockchainTestBase
                 RlpStream rlpContext = Bytes.FromHexString(testBlockJson.Rlp!).AsRlpStream();
                 Block suggestedBlock = Rlp.Decode<Block>(rlpContext);
 
+                // Always add decoded blocks to correctRlp, even if BlockHeader is null
+                // This mirrors geth's behavior: decode and insert all blocks, then check validation results
                 if (testBlockJson.BlockHeader is not null)
                 {
+                    // Verify header hash matches test JSON expectation
                     Assert.That(suggestedBlock.Header.Hash, Is.EqualTo(new Hash256(testBlockJson.BlockHeader.Hash)));
 
                     for (int uncleIndex = 0; uncleIndex < suggestedBlock.Uncles.Length; uncleIndex++)
                     {
                         Assert.That(suggestedBlock.Uncles[uncleIndex].Hash, Is.EqualTo(new Hash256(testBlockJson.UncleHeaders![uncleIndex].Hash)));
                     }
-
-                    correctRlp.Add((suggestedBlock, testBlockJson.ExpectedException));
                 }
+
+                // Add block regardless of BlockHeader presence
+                correctRlp.Add((suggestedBlock, testBlockJson.ExpectedException));
             }
             catch (Exception e)
             {

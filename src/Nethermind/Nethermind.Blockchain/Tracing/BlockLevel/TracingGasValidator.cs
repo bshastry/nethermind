@@ -51,11 +51,6 @@ public class TracingGasValidator
         long blockGasLimit,
         bool isValid)
     {
-        if (transactions is null || transactions.Length == 0)
-        {
-            return;
-        }
-
         var operation = new GasAccountingOperation
         {
             BlockGasLimit = $"0x{blockGasLimit:x}",
@@ -65,19 +60,27 @@ public class TracingGasValidator
 
         long cumulativeGas = 0;
 
-        for (int i = 0; i < transactions.Length; i++)
+        if (transactions is null || transactions.Length == 0)
         {
-            var tx = transactions[i];
-            long txGasUsed = gasUsed is not null && i < gasUsed.Length ? gasUsed[i] : 0;
-            cumulativeGas += txGasUsed;
-
-            operation.Transactions.Add(new TransactionGasAccounting
+            // Set to null for empty blocks to match geth format
+            operation.Transactions = null;
+        }
+        else
+        {
+            for (int i = 0; i < transactions.Length; i++)
             {
-                TxIndex = $"0x{i:x}",
-                GasLimit = $"0x{tx.GasLimit:x}",
-                GasUsed = $"0x{txGasUsed:x}",
-                CumulativeGasUsed = $"0x{cumulativeGas:x}"
-            });
+                var tx = transactions[i];
+                long txGasUsed = gasUsed is not null && i < gasUsed.Length ? gasUsed[i] : 0;
+                cumulativeGas += txGasUsed;
+
+                operation.Transactions!.Add(new TransactionGasAccounting
+                {
+                    TxIndex = $"0x{i:x}",
+                    GasLimit = $"0x{tx.GasLimit:x}",
+                    GasUsed = $"0x{txGasUsed:x}",
+                    CumulativeGasUsed = $"0x{cumulativeGas:x}"
+                });
+            }
         }
 
         operation.TotalGasUsed = $"0x{cumulativeGas:x}";
@@ -235,6 +238,7 @@ public class TracingGasValidator
     {
         if (transactionGasData is null)
         {
+            TraceGasAccounting(null, null, blockGasLimit, isValid);
             return;
         }
 

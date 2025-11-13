@@ -3,6 +3,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using Ethereum.Test.Base;
@@ -93,9 +94,17 @@ public class BlockchainTestStreamingTracer(GethTraceOptions options, Stream? out
     /// <summary>
     /// Writes a JSONL-compliant test end marker to the trace stream.
     /// This MUST be the last line written to stderr for the test.
-    /// Format: {"testEnd":{"name":"...","pass":bool,"fork":"...","v":1,...}}
+    /// Format: {"testEnd":{"name":"...","pass":bool,"fork":"...","error":"...",...}}
     /// </summary>
-    public void TestFinished(string testName, bool pass, IReleaseSpec spec, TimeSpan? duration, Hash256? headStateRoot)
+    public void TestFinished(
+        string testName,
+        bool pass,
+        IReleaseSpec spec,
+        TimeSpan? duration,
+        Hash256? headStateRoot,
+        string? error = null,
+        ErrorDetails? errorDetails = null,
+        long? lastValidBlock = null)
     {
         using var writer = new Utf8JsonWriter(_output, new JsonWriterOptions
         {
@@ -106,26 +115,46 @@ public class BlockchainTestStreamingTracer(GethTraceOptions options, Stream? out
         writer.WritePropertyName("testEnd");
         writer.WriteStartObject();
 
-        // Required fields
-        writer.WriteString("name", testName);
-        writer.WriteBoolean("pass", pass);
-        writer.WriteString("fork", spec.ToString());
+        // Write all fields in ALPHABETICAL ORDER for standardization across clients
 
-        // Optional fields (only if available)
-        if (duration.HasValue)
-            writer.WriteNumber("d", Math.Round(duration.Value.TotalSeconds, 3));
-
-        if (_totalGasUsed > 0)
-            writer.WriteString("gasUsed", $"0x{_totalGasUsed:x}");
-
-        if (_transactionCount > 0)
-            writer.WriteNumber("txs", _transactionCount);
-
+        // 1. blocks (optional metric)
         if (_blockCount > 0)
             writer.WriteNumber("blocks", _blockCount);
 
+        // 2. d (duration - optional metric)
+        if (duration.HasValue)
+            writer.WriteNumber("d", Math.Round(duration.Value.TotalSeconds, 3));
+
+        // 3. error (simple error code string for geth compatibility)
+        if (errorDetails is not null)
+        {
+            writer.WriteString("error", errorDetails.Code);
+        }
+
+        // 4. fork (required)
+        writer.WriteString("fork", spec.ToString());
+
+        // 5. gasUsed (optional metric)
+        if (_totalGasUsed > 0)
+            writer.WriteString("gasUsed", $"0x{_totalGasUsed:x}");
+
+        // 6. lastValidBlock (track last successfully validated block index for failed tests)
+        if (lastValidBlock.HasValue)
+            writer.WriteNumber("lastValidBlock", lastValidBlock.Value);
+
+        // 7. lastValidStateRoot (final state root for success, last valid for failure)
         if (headStateRoot is not null)
-            writer.WriteString("root", headStateRoot.ToString());
+            writer.WriteString("lastValidStateRoot", headStateRoot.ToString());
+
+        // 8. name (required)
+        writer.WriteString("name", testName);
+
+        // 9. pass (required)
+        writer.WriteBoolean("pass", pass);
+
+        // 10. txs (optional metric)
+        if (_transactionCount > 0)
+            writer.WriteNumber("txs", _transactionCount);
 
         writer.WriteEndObject(); // testEnd
         writer.WriteEndObject(); // root

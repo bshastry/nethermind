@@ -367,6 +367,14 @@ public partial class BlockProcessor(
             return;
         }
 
+        // Skip validation tracing for genesis block only
+        // Genesis (block 0) is initialized, not validated
+        // All other blocks (including empty ones) should emit validation traces
+        if (block.Number == 0)
+        {
+            return;
+        }
+
         BlockHeader header = block.Header;
 
         // Trace gas accounting

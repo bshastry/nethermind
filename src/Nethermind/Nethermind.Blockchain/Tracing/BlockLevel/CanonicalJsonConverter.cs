@@ -288,6 +288,9 @@ public static class CanonicalFormatHelpers
             // Use camelCase for consistency
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 
+            // Don't escape + and other safe characters for better readability
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+
             // Add canonical key ordering converter
             Converters = { new CanonicalJsonConverter() }
         };

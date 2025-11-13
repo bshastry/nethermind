@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 using Nethermind.Core;
 using Nethermind.Int256;
 
@@ -167,9 +168,10 @@ public class RuleCalculation
 public class GasAccountingOperation : ValidationOperation
 {
     /// <summary>
-    /// Gas accounting for each transaction
+    /// Gas accounting for each transaction (null when block has no transactions)
     /// </summary>
-    public List<TransactionGasAccounting> Transactions { get; set; } = new();
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public List<TransactionGasAccounting>? Transactions { get; set; } = new();
 
     /// <summary>
     /// Block gas limit (hexadecimal)

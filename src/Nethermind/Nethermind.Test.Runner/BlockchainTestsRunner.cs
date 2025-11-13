@@ -259,9 +259,9 @@ public class BlockchainTestsRunner(
         public void TraceValidation(ValidationOperation operation) => _receiptsTracer.TraceValidation(operation);
         public void TraceTrieOperation(TrieOperation operation) => _receiptsTracer.TraceTrieOperation(operation);
 
-        public void TestFinished(string testName, bool pass, IReleaseSpec spec, TimeSpan? duration, Hash256? headStateRoot)
+        public void TestFinished(string testName, bool pass, IReleaseSpec spec, TimeSpan? duration, Hash256? headStateRoot, string? error = null, ErrorDetails? errorDetails = null, long? lastValidBlock = null)
         {
-            _blockTracer.WriteTestEndMarker(testName, pass, spec, duration, headStateRoot);
+            _blockTracer.WriteTestEndMarker(testName, pass, spec, duration, headStateRoot, error, errorDetails, lastValidBlock);
         }
     }
 
@@ -352,10 +352,10 @@ public class BlockchainTestsRunner(
             _receiptsTracer.TraceTrieOperation(operation);
         }
 
-        public void TestFinished(string testName, bool pass, IReleaseSpec spec, TimeSpan? duration, Hash256? headStateRoot)
+        public void TestFinished(string testName, bool pass, IReleaseSpec spec, TimeSpan? duration, Hash256? headStateRoot, string? error = null, ErrorDetails? errorDetails = null, long? lastValidBlock = null)
         {
-            _testTracer.TestFinished(testName, pass, spec, duration, headStateRoot);
-            _blockTracer.WriteTestEndMarker(testName, pass, spec, duration, headStateRoot);
+            _testTracer.TestFinished(testName, pass, spec, duration, headStateRoot, error, errorDetails, lastValidBlock);
+            _blockTracer.WriteTestEndMarker(testName, pass, spec, duration, headStateRoot, error, errorDetails, lastValidBlock);
         }
     }
 }
