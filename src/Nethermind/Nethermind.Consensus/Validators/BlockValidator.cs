@@ -69,11 +69,12 @@ public class BlockValidator(
         IReleaseSpec spec = _specProvider.GetSpec(block.Header);
         errorMessage = null;
 
-        return ValidateBlockSize(block, spec, ref errorMessage) &&
-               ValidateTransactions(block, spec, ref errorMessage) &&
-               ValidateEip4844Fields(block, spec, ref errorMessage) &&
+        // Validate in order: cheap → expensive, block-level → transaction-level
+        return ValidateHeader<TOrphaned>(block, parent, ref errorMessage) &&
+               ValidateBlockSize(block, spec, ref errorMessage) &&
                ValidateUncles<TOrphaned>(block, spec, validateHashes, ref errorMessage) &&
-               ValidateHeader<TOrphaned>(block, parent, ref errorMessage) &&
+               ValidateEip4844Fields(block, spec, ref errorMessage) &&
+               ValidateTransactions(block, spec, ref errorMessage) &&
                ValidateTxRootMatchesTxs(block, validateHashes, ref errorMessage) &&
                ValidateWithdrawals(block, spec, validateHashes, ref errorMessage);
     }

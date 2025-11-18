@@ -300,11 +300,45 @@ public abstract class BlockchainTestBase
             correctRlp[i].Block.Header.IsPostMerge = correctRlp[i].Block.Difficulty == 0;
 
             // For tests with reorgs, find the actual parent header from block tree
-            BlockHeader currentParentHeader = blockTree.FindHeader(correctRlp[i].Block.ParentHash) ?? parentHeader;
+            BlockHeader? currentParentHeader = blockTree.FindHeader(correctRlp[i].Block.ParentHash);
+
+            bool expectsException = correctRlp[i].ExpectedException is not null;
+
+            // Check if parent exists (unless this is genesis block)
+            if (currentParentHeader is null && correctRlp[i].Block.Number > 0)
+            {
+                if (!expectsException)
+                {
+                    // Block has missing parent and shouldn't fail → test failed
+                    return (parentHeader,
+                        $"block #{correctRlp[i].Block.Number} has unknown parent {correctRlp[i].Block.ParentHash}",
+                        parentHeader.Number);
+                }
+                else
+                {
+                    // Block expected to fail → verify it's UNKNOWN_PARENT
+                    string expectedError = correctRlp[i].ExpectedException!;
+                    ErrorDetails expectedDetails = EestErrorMapper.MapErrorToEEST(expectedError);
+
+                    // Map UNKNOWN_PARENT error
+                    ErrorDetails actualDetails = EestErrorMapper.MapErrorToEEST("InvalidAncestor");
+
+                    if (expectedDetails.Code != actualDetails.Code)
+                    {
+                        return (parentHeader,
+                            $"block #{correctRlp[i].Block.Number} failed with wrong exception. Expected: {expectedDetails.Code}, Actual: {actualDetails.Code} (missing parent)",
+                            parentHeader.Number);
+                    }
+                    // Expected failure occurred → skip to next block
+                    continue;
+                }
+            }
+
+            // Use found parent or genesis parent
+            currentParentHeader ??= parentHeader;
 
             Assert.That(correctRlp[i].Block.Hash, Is.Not.Null, $"null hash in {test.Name} block {i}");
 
-            bool expectsException = correctRlp[i].ExpectedException is not null;
             // Validate block structure first (mimics SyncServer validation)
             if (blockValidator.ValidateSuggestedBlock(correctRlp[i].Block, currentParentHeader, out string? validationError))
             {
