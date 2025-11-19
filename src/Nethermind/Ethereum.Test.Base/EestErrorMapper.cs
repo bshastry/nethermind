@@ -49,7 +49,7 @@ public static class EestErrorMapper
         ["InvalidDifficulty"] = ("BlockException.INVALID_DIFFICULTY", "Block difficulty does not match expected value"),
         ["InvalidTotalDifficulty"] = ("BlockException.INVALID_DIFFICULTY", "Total difficulty could not be validated"),
         ["InvalidBaseFeePerGas"] = ("BlockException.INVALID_BASEFEE_PER_GAS", "Base fee per gas does not match calculated value"),
-        ["Does not match calculated"] = ("BlockException.INVALID_BASEFEE_PER_GAS", "Base fee calculation incorrect"),
+        // Removed overly generic pattern "Does not match calculated" - use specific prefixes instead
 
         // Seal Parameters
         ["InvalidSealParameters"] = ("BlockException.INVALID_DIFFICULTY", "Seal parameters could not be validated"),

@@ -316,17 +316,16 @@ public abstract class BlockchainTestBase
                 }
                 else
                 {
-                    // Block expected to fail → verify it's UNKNOWN_PARENT
+                    // Block expected to fail → verify it matches one of the expected exceptions
                     string expectedError = correctRlp[i].ExpectedException!;
-                    ErrorDetails expectedDetails = EestErrorMapper.MapErrorToEEST(expectedError);
 
                     // Map UNKNOWN_PARENT error
                     ErrorDetails actualDetails = EestErrorMapper.MapErrorToEEST("InvalidAncestor");
 
-                    if (expectedDetails.Code != actualDetails.Code)
+                    if (!MatchesExpectedException(actualDetails, expectedError))
                     {
                         return (parentHeader,
-                            $"block #{correctRlp[i].Block.Number} failed with wrong exception. Expected: {expectedDetails.Code}, Actual: {actualDetails.Code} (missing parent)",
+                            $"block #{correctRlp[i].Block.Number} failed with wrong exception. Expected: {expectedError}, Actual: {actualDetails.Code} (missing parent)",
                             parentHeader.Number);
                     }
                     // Expected failure occurred → skip to next block
@@ -367,15 +366,14 @@ public abstract class BlockchainTestBase
                     }
                     else
                     {
-                        // Expected to fail - verify the exception matches
+                        // Expected to fail - verify the exception matches one of the expected exceptions
                         string expectedError = correctRlp[i].ExpectedException!;
-                        ErrorDetails expectedDetails = EestErrorMapper.MapErrorToEEST(expectedError);
                         ErrorDetails actualDetails = EestErrorMapper.MapErrorToEEST(e.Message);
 
-                        if (expectedDetails.Code != actualDetails.Code)
+                        if (!MatchesExpectedException(actualDetails, expectedError))
                         {
                             return (parentHeader,
-                                $"block #{correctRlp[i].Block.Number} failed with wrong exception. Expected: {expectedDetails.Code}, Actual: {actualDetails.Code} (raw: {e.Message})",
+                                $"block #{correctRlp[i].Block.Number} failed with wrong exception. Expected: {expectedError}, Actual: {actualDetails.Code} (raw: {e.Message})",
                                 parentHeader.Number);
                         }
                         // else: Expected exception matches actual exception → correct behavior
@@ -400,15 +398,14 @@ public abstract class BlockchainTestBase
                 }
                 else
                 {
-                    // Expected to fail - verify the exception matches
+                    // Expected to fail - verify the exception matches one of the expected exceptions
                     string expectedError = correctRlp[i].ExpectedException!;
-                    ErrorDetails expectedDetails = EestErrorMapper.MapErrorToEEST(expectedError);
                     ErrorDetails actualDetails = EestErrorMapper.MapErrorToEEST(validationError!);
 
-                    if (expectedDetails.Code != actualDetails.Code)
+                    if (!MatchesExpectedException(actualDetails, expectedError))
                     {
                         return (parentHeader,
-                            $"block #{correctRlp[i].Block.Number} failed with wrong exception. Expected: {expectedDetails.Code}, Actual: {actualDetails.Code} (raw: {validationError})",
+                            $"block #{correctRlp[i].Block.Number} failed with wrong exception. Expected: {expectedError}, Actual: {actualDetails.Code} (raw: {validationError})",
                             parentHeader.Number);
                     }
                     // else: Expected exception matches actual exception → correct behavior
@@ -416,6 +413,36 @@ public abstract class BlockchainTestBase
             }
         }
         return (parentHeader, null, parentHeader.Number);
+    }
+
+    /// <summary>
+    /// Checks if an actual error matches any of the expected exceptions (pipe-separated format).
+    /// Supports both single exceptions and pipe-separated lists: "BlockException.A|BlockException.B"
+    /// Returns true if the actual error code matches ANY of the expected exceptions.
+    /// </summary>
+    private static bool MatchesExpectedException(ErrorDetails? actualDetails, string expectedError)
+    {
+        if (actualDetails is null || string.IsNullOrEmpty(expectedError))
+            return false;
+
+        // Handle pipe-separated exceptions: "BlockException.A|BlockException.B"
+        // Test passes if actual error matches ANY of the expected exceptions
+        string[] exceptions = expectedError.Split('|');
+        foreach (string exc in exceptions)
+        {
+            string trimmedExc = exc.Trim();
+            if (string.IsNullOrEmpty(trimmedExc))
+                continue;
+
+            // Try mapping the exception string to EEST format and comparing
+            ErrorDetails expectedDetails = EestErrorMapper.MapErrorToEEST(trimmedExc);
+            if (expectedDetails?.Code == actualDetails.Code)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async static Task RunNewPayloads(TestEngineNewPayloadsJson[]? newPayloads, IEngineRpcModule engineRpcModule)
