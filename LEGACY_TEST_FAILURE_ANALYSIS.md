@@ -57,16 +57,34 @@ The fix is **semantically correct** and matches geth's behavior, but:
 - Legacy test expected hashes are now wrong
 - Any test with a failing transaction will mismatch
 
-## Recommended Fix
+## Implemented Fix
 
-### Option 1: Update Legacy Test Expected Hashes
-Regenerate the expected state roots for legacy tests using a tool that matches geth's behavior.
+**Option 2 was implemented**: Added `IsLegacy` flag to maintain old coinbase behavior for legacy tests.
 
-### Option 2: Keep Separate Behavior for Legacy Tests
-Create a separate code path for legacy tests that maintains the old coinbase behavior.
+### Changes Made
 
-### Option 3: Skip Legacy Tests Affected by This Change
-Identify and skip tests that have failing transactions and would be affected by the coinbase timing change.
+1. **GeneralStateTest.cs**: Added `IsLegacy` property
+   ```csharp
+   public bool IsLegacy { get; set; }
+   ```
+
+2. **LoadLegacyGeneralStateTestsStrategy.cs**: Set `IsLegacy = true` when loading legacy tests
+   ```csharp
+   if (ethereumTest is GeneralStateTest generalStateTest)
+   {
+       generalStateTest.IsLegacy = true;
+   }
+   ```
+
+3. **GeneralTestBase.cs**: Handle legacy mode in `RunTest`:
+   - For legacy tests: Create coinbase BEFORE tx execution (old behavior)
+   - For modern tests: Create coinbase only AFTER successful tx (new correct behavior)
+
+### Why This Approach
+
+- ~100k legacy tests would fail with the new correct behavior
+- Regenerating all legacy test expectations via retesteth is impractical
+- This approach maintains backward compatibility while keeping correct behavior for modern tests
 
 ## Affected Test Categories
 
@@ -84,4 +102,4 @@ Only 2 files:
 
 ## Conclusion
 
-The coinbase fix is correct but breaks legacy tests whose expected state roots were computed with buggy behavior. The fix should be kept, but legacy tests need their expected hashes regenerated or skipped.
+The coinbase fix is semantically correct and matches geth/retesteth behavior. Legacy tests (~100k) have expected state roots computed with the old buggy behavior. The implemented fix uses an `IsLegacy` flag to maintain backward compatibility for legacy tests while keeping the correct behavior for modern tests.

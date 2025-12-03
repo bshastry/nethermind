@@ -93,6 +93,19 @@ namespace Ethereum.Test.Base
 
             InitializeTestState(test.Pre, stateProvider, specProvider);
 
+            // Legacy tests expect coinbase to be created BEFORE transaction execution
+            // (old buggy behavior that was baked into expected state roots).
+            // Modern tests correctly create coinbase only after successful tx.
+            if (test.IsLegacy && test.CurrentCoinbase is not null)
+            {
+                if (!stateProvider.AccountExists(test.CurrentCoinbase))
+                {
+                    stateProvider.CreateAccount(test.CurrentCoinbase, 0);
+                }
+                stateProvider.Commit(specProvider.GetSpec((ForkActivation)1));
+                stateProvider.RecalculateStateRoot();
+            }
+
             BlockHeader header = new(
                 test.PreviousHash,
                 Keccak.OfAnEmptySequenceRlp,
@@ -155,7 +168,8 @@ namespace Ethereum.Test.Base
                 stateProvider.CommitTree(1);
 
                 // '@winsvega added a 0-wei reward to the miner , so we had to add that into the state test execution phase. He needed it for retesteth.'
-                if (!stateProvider.AccountExists(test.CurrentCoinbase))
+                // For legacy tests, coinbase was already created before tx execution.
+                if (!test.IsLegacy && !stateProvider.AccountExists(test.CurrentCoinbase))
                 {
                     stateProvider.CreateAccount(test.CurrentCoinbase, 0);
                 }
@@ -166,7 +180,15 @@ namespace Ethereum.Test.Base
             }
             else
             {
-                stateProvider.Reset();
+                // For legacy tests with failed tx, we need to recalculate root since coinbase was created
+                if (test.IsLegacy)
+                {
+                    stateProvider.RecalculateStateRoot();
+                }
+                else
+                {
+                    stateProvider.Reset();
+                }
             }
 
             List<string> differences = RunAssertions(test, stateProvider);
