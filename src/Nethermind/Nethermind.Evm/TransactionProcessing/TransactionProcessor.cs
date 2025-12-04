@@ -544,6 +544,16 @@ namespace Nethermind.Evm.TransactionProcessing
                 overflows = !_blobBaseFeeCalculator.TryCalculateBlobBaseFee(header, tx, spec.BlobBaseFeeUpdateFraction, out blobBaseFee);
                 if (!overflows)
                 {
+                    // Check that tx.MaxFeePerBlobGas >= feePerBlobGas (the current blob gas price)
+                    // This is analogous to geth's check in state_transition.go
+                    if (validate && BlobGasCalculator.TryCalculateFeePerBlobGas(header, spec.BlobBaseFeeUpdateFraction, out UInt256 feePerBlobGas))
+                    {
+                        if ((UInt256)tx.MaxFeePerBlobGas! < feePerBlobGas)
+                        {
+                            TraceLogInvalidTx(tx, $"INSUFFICIENT_MAX_FEE_PER_BLOB_GAS: tx.MaxFeePerBlobGas ({tx.MaxFeePerBlobGas}) < feePerBlobGas ({feePerBlobGas})");
+                            return TransactionResult.InsufficientMaxFeePerBlobGas;
+                        }
+                    }
                     overflows = UInt256.AddOverflow(senderReservedGasPayment, blobBaseFee, out senderReservedGasPayment);
                 }
             }
@@ -956,6 +966,7 @@ namespace Nethermind.Evm.TransactionProcessing
             ErrorType.GasLimitBelowIntrinsicGas => "gas limit below intrinsic gas",
             ErrorType.InsufficientMaxFeePerGasForSenderBalance => "insufficient MaxFeePerGas for sender balance",
             ErrorType.InsufficientSenderBalance => "insufficient sender balance",
+            ErrorType.InsufficientMaxFeePerBlobGas => "max fee per blob gas less than block blob gas fee",
             ErrorType.MalformedTransaction => "malformed",
             ErrorType.MinerPremiumNegative => "miner premium is negative",
             ErrorType.NonceOverflow => "nonce overflow",
@@ -986,6 +997,7 @@ namespace Nethermind.Evm.TransactionProcessing
         public static readonly TransactionResult GasLimitBelowIntrinsicGas = ErrorType.GasLimitBelowIntrinsicGas;
         public static readonly TransactionResult InsufficientMaxFeePerGasForSenderBalance = ErrorType.InsufficientMaxFeePerGasForSenderBalance;
         public static readonly TransactionResult InsufficientSenderBalance = ErrorType.InsufficientSenderBalance;
+        public static readonly TransactionResult InsufficientMaxFeePerBlobGas = ErrorType.InsufficientMaxFeePerBlobGas;
         public static readonly TransactionResult MalformedTransaction = ErrorType.MalformedTransaction;
         public static readonly TransactionResult MinerPremiumNegative = ErrorType.MinerPremiumNegative;
         public static readonly TransactionResult NonceOverflow = ErrorType.NonceOverflow;
@@ -1001,6 +1013,7 @@ namespace Nethermind.Evm.TransactionProcessing
             GasLimitBelowIntrinsicGas,
             InsufficientMaxFeePerGasForSenderBalance,
             InsufficientSenderBalance,
+            InsufficientMaxFeePerBlobGas,
             MalformedTransaction,
             MinerPremiumNegative,
             NonceOverflow,
