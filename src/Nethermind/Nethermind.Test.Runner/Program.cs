@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Ethereum.Test.Base;
 using Ethereum.Test.Base.Interfaces;
 using Nethermind.Specs;
+using Nethermind.Test.Runner.Validator;
 
 namespace Nethermind.Test.Runner;
 
@@ -50,6 +51,33 @@ internal class Program
 
         public static Option<bool> EnableWarmup { get; } =
             new("--warmup", "-wu") { Description = "Enable warmup for benchmarking purposes." };
+
+        public static Option<bool> ValidateCorpus { get; } =
+            new("--validateCorpus", "-v") { Description = "Run cross-VM corpus validation mode." };
+
+        public static Option<string> CorpusDir { get; } =
+            new("--corpusDir", "-c") { Description = "Directory containing corpus files to validate." };
+
+        public static Option<string> Fork { get; } =
+            new("--fork") { Description = "EVM fork name (e.g., Prague, Osaka, Cancun). Default: Prague" };
+
+        public static Option<int> Workers { get; } =
+            new("--workers") { Description = "Number of worker threads. Default: CPU count" };
+
+        public static Option<bool> DumpTraces { get; } =
+            new("--dumpTraces") { Description = "Dump traces for divergent tests." };
+
+        public static Option<string> OutputDir { get; } =
+            new("--outputDir", "-o") { Description = "Output directory for reports and trace dumps." };
+
+        public static Option<bool> JsonReport { get; } =
+            new("--json") { Description = "Output JSON report." };
+
+        public static Option<bool> Quiet { get; } =
+            new("--quiet", "-q") { Description = "Suppress progress output." };
+
+        public static Option<bool> Triage { get; } =
+            new("--triage") { Description = "Enable divergence triage/clustering." };
     }
 
     public static async Task<int> Main(params string[] args)
@@ -68,6 +96,15 @@ internal class Program
             Options.Stdin,
             Options.GnosisTest,
             Options.EnableWarmup,
+            Options.ValidateCorpus,
+            Options.CorpusDir,
+            Options.Fork,
+            Options.Workers,
+            Options.DumpTraces,
+            Options.OutputDir,
+            Options.JsonReport,
+            Options.Quiet,
+            Options.Triage,
         ];
         rootCommand.SetAction(Run);
 
@@ -76,6 +113,11 @@ internal class Program
 
     private static async Task<int> Run(ParseResult parseResult, CancellationToken cancellationToken)
     {
+        if (parseResult.GetValue(Options.ValidateCorpus))
+        {
+            return await RunCorpusValidation(parseResult, cancellationToken);
+        }
+
         WhenTrace whenTrace = WhenTrace.WhenFailing;
 
         if (parseResult.GetValue(Options.TraceNever))
@@ -156,5 +198,30 @@ internal class Program
             ? new TestsSourceLoader(new LoadGeneralStateTestFileStrategy(), path)
             : new TestsSourceLoader(new LoadGeneralStateTestsStrategy(), path);
         testRunnerBuilder(source).RunTests();
+    }
+
+    private static async Task<int> RunCorpusValidation(ParseResult parseResult, CancellationToken cancellationToken)
+    {
+        string corpusDir = parseResult.GetValue(Options.CorpusDir);
+        string fork = parseResult.GetValue(Options.Fork) ?? "Prague";
+        int workers = parseResult.GetValue(Options.Workers);
+        if (workers <= 0) workers = Environment.ProcessorCount;
+
+        var options = new ValidatorOptions
+        {
+            DumpTraces = parseResult.GetValue(Options.DumpTraces),
+            OutputDir = parseResult.GetValue(Options.OutputDir),
+            JsonOutput = parseResult.GetValue(Options.JsonReport),
+            Quiet = parseResult.GetValue(Options.Quiet),
+            Triage = parseResult.GetValue(Options.Triage)
+        };
+
+        var validator = new CorpusValidator(corpusDir, fork, workers, options);
+        var report = await validator.ValidateAsync(cancellationToken);
+
+        // Exit codes: 0=all pass, 1=divergences, 2=errors
+        if (report.HasErrors) return 2;
+        if (report.HasDivergences) return 1;
+        return 0;
     }
 }
