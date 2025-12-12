@@ -204,6 +204,7 @@ public sealed class CorpusValidator
         // Write JSON report if requested
         if (_options.JsonOutput && _options.OutputDir is not null)
         {
+            Directory.CreateDirectory(_options.OutputDir);
             string jsonPath = Path.Combine(_options.OutputDir, "validation-report.json");
             report.WriteJsonReport(jsonPath);
 

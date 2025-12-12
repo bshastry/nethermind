@@ -63,10 +63,13 @@ public class NormalizingTracer : ITxTracer, IDisposable
         if (_currentOp is null) return;
 
         // Capture last 6 stack items as UInt256
+        // Geth outputs stack from bottom to top (bottom=index 0, top=last index)
+        // PeekUInt256(0) gets top of stack, so we need to reverse the order
         int count = Math.Min(6, stack.Count);
         _currentOp.Stack = new List<UInt256>(count);
 
-        for (int i = 0; i < count; i++)
+        // Add items in reverse order: from deepest (count-1) to top (0)
+        for (int i = count - 1; i >= 0; i--)
         {
             _currentOp.Stack.Add(stack.PeekUInt256(i));
         }
