@@ -15,6 +15,7 @@ using Ethereum.Test.Base;
 using Ethereum.Test.Base.Interfaces;
 using Nethermind.Config;
 using Nethermind.Consensus.Processing;
+using Nethermind.Consensus.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
@@ -273,11 +274,19 @@ public sealed class ValidationWorker
                 TraceNormalizer normalizer = new();
                 NormalizingTracer tracer = new(normalizer);
 
-                // Execute transaction
-                TransactionResult? txResult = transactionProcessor.Execute(
-                    test.Transaction,
-                    new BlockExecutionContext(header, spec),
-                    tracer);
+                // Validate transaction before execution (matching GeneralStateTestBase behavior)
+                // Note: Use Core.ValidationResult to avoid collision with Validator.ValidationResult
+                bool txIsValid = new TxValidator(test.ChainId).IsWellFormed(test.Transaction, spec);
+                TransactionResult? txResult = null;
+
+                if (txIsValid)
+                {
+                    // Execute transaction only if valid
+                    txResult = transactionProcessor.Execute(
+                        test.Transaction,
+                        new BlockExecutionContext(header, spec),
+                        tracer);
+                }
 
                 if (txResult is not null && txResult.Value == TransactionResult.Ok)
                 {
