@@ -964,6 +964,7 @@ namespace Nethermind.Evm.TransactionProcessing
         {
             ErrorType.BlockGasLimitExceeded => "Block gas limit exceeded",
             ErrorType.GasLimitBelowIntrinsicGas => "gas limit below intrinsic gas",
+            ErrorType.InsufficientMaxFeePerBlobGas => "insufficient MaxFeePerBlobGas for blob base fee",
             ErrorType.InsufficientMaxFeePerGasForSenderBalance => "insufficient MaxFeePerGas for sender balance",
             ErrorType.InsufficientSenderBalance => "insufficient sender balance",
             ErrorType.InsufficientMaxFeePerBlobGas => "max fee per blob gas less than block blob gas fee",
@@ -996,6 +997,7 @@ namespace Nethermind.Evm.TransactionProcessing
 
         public static readonly TransactionResult BlockGasLimitExceeded = ErrorType.BlockGasLimitExceeded;
         public static readonly TransactionResult GasLimitBelowIntrinsicGas = ErrorType.GasLimitBelowIntrinsicGas;
+        public static readonly TransactionResult InsufficientMaxFeePerBlobGas = ErrorType.InsufficientMaxFeePerBlobGas;
         public static readonly TransactionResult InsufficientMaxFeePerGasForSenderBalance = ErrorType.InsufficientMaxFeePerGasForSenderBalance;
         public static readonly TransactionResult InsufficientSenderBalance = ErrorType.InsufficientSenderBalance;
         public static readonly TransactionResult InsufficientMaxFeePerBlobGas = ErrorType.InsufficientMaxFeePerBlobGas;
@@ -1013,6 +1015,7 @@ namespace Nethermind.Evm.TransactionProcessing
             None,
             BlockGasLimitExceeded,
             GasLimitBelowIntrinsicGas,
+            InsufficientMaxFeePerBlobGas,
             InsufficientMaxFeePerGasForSenderBalance,
             InsufficientSenderBalance,
             InsufficientMaxFeePerBlobGas,

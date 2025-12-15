@@ -149,6 +149,7 @@ namespace Ethereum.Test.Base
 
             ValidationResult txIsValid = new TxValidator(test.ChainId).IsWellFormed(test.Transaction, spec);
             TransactionResult? txResult = null;
+
             if (txIsValid)
             {
                 txResult = transactionProcessor.Execute(test.Transaction, new BlockExecutionContext(header, spec), txTracer);
