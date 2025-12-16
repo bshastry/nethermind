@@ -967,7 +967,6 @@ namespace Nethermind.Evm.TransactionProcessing
             ErrorType.InsufficientMaxFeePerBlobGas => "insufficient MaxFeePerBlobGas for blob base fee",
             ErrorType.InsufficientMaxFeePerGasForSenderBalance => "insufficient MaxFeePerGas for sender balance",
             ErrorType.InsufficientSenderBalance => "insufficient sender balance",
-            ErrorType.InsufficientMaxFeePerBlobGas => "max fee per blob gas less than block blob gas fee",
             ErrorType.MalformedTransaction => "malformed",
             ErrorType.MinerPremiumNegative => "miner premium is negative",
             ErrorType.NonceOverflow => "nonce overflow",
@@ -1000,7 +999,6 @@ namespace Nethermind.Evm.TransactionProcessing
         public static readonly TransactionResult InsufficientMaxFeePerBlobGas = ErrorType.InsufficientMaxFeePerBlobGas;
         public static readonly TransactionResult InsufficientMaxFeePerGasForSenderBalance = ErrorType.InsufficientMaxFeePerGasForSenderBalance;
         public static readonly TransactionResult InsufficientSenderBalance = ErrorType.InsufficientSenderBalance;
-        public static readonly TransactionResult InsufficientMaxFeePerBlobGas = ErrorType.InsufficientMaxFeePerBlobGas;
         public static readonly TransactionResult MalformedTransaction = ErrorType.MalformedTransaction;
         public static readonly TransactionResult MinerPremiumNegative = ErrorType.MinerPremiumNegative;
         public static readonly TransactionResult NonceOverflow = ErrorType.NonceOverflow;
@@ -1018,7 +1016,6 @@ namespace Nethermind.Evm.TransactionProcessing
             InsufficientMaxFeePerBlobGas,
             InsufficientMaxFeePerGasForSenderBalance,
             InsufficientSenderBalance,
-            InsufficientMaxFeePerBlobGas,
             MalformedTransaction,
             MinerPremiumNegative,
             NonceOverflow,

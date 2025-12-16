@@ -222,7 +222,7 @@ public sealed class ValidationWorker
                 ITransactionProcessor transactionProcessor = mainBlockProcessingContext.TransactionProcessor;
 
                 // Initialize test state
-                GeneralStateTestBase.InitializeTestState(test.Pre, test.CurrentCoinbase, stateProvider, specProvider);
+                GeneralStateTestBase.InitializeTestState(test.Pre, stateProvider, specProvider);
 
                 // Build block header
                 BlockHeader header = new(
