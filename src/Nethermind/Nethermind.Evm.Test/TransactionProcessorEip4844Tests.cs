@@ -154,5 +154,13 @@ internal class TransactionProcessorEip4844Tests
             TestName = $"Rejected if balance does not cover {nameof(Transaction.MaxFeePerBlobGas)} + {nameof(Transaction.Value)}, all funds are returned",
             ExpectedResult = UInt256.Zero,
         };
+        // EIP-4844: MaxFeePerBlobGas must be >= feePerBlobGas (blob gas price)
+        // When excessBlobGas = BlobBaseFeeUpdateFraction, feePerBlobGas = 2
+        // So MaxFeePerBlobGas = 1 should be rejected even with plenty of balance
+        yield return new TestCaseData(1.Ether(), 1, 1ul, (ulong)Cancun.Instance.BlobBaseFeeUpdateFraction, 0ul)
+        {
+            TestName = $"Rejected if {nameof(Transaction.MaxFeePerBlobGas)} is less than current blob gas price (EIP-4844)",
+            ExpectedResult = UInt256.Zero,
+        };
     }
 }
