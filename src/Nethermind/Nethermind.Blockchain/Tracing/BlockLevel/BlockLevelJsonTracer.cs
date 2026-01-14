@@ -330,22 +330,27 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
 
     /// <summary>
     /// Writes a txEnd record with data from transaction receipt in canonical format.
+    /// When receipt is null, this indicates the transaction failed pre-execution validation
+    /// (e.g., insufficient funds, invalid nonce), so we emit a failure status.
     /// </summary>
     private void WriteTxEnd(int txIndex, Transaction? tx, TxReceipt? receipt)
     {
         if (receipt is null)
         {
-            // Fallback to minimal record if receipt not available
+            // No receipt means transaction failed validation before execution started.
+            // This happens for errors like "insufficient funds for gas * price + value",
+            // "wrong nonce", etc. We must report status=0x0 (failure) to match geth's behavior.
+            // Note: Geth's failed txEnd format does NOT include effectiveGasPrice, gasPrice, or logsBloom.
+            // The error field should ideally contain the validation error message,
+            // but the current architecture doesn't pass the error through EndTxTrace().
+            // A future enhancement could add an error parameter to EndTxTrace().
             WriteJsonLine(new
             {
                 type = "txEnd",
                 txIndex = ToHex((ulong)txIndex),
                 cumulativeGasUsed = ToHex(_cumulativeGasUsed),
-                effectiveGasPrice = tx is not null ? ToHex(tx.GasPrice) : "0x0",
-                gasPrice = tx is not null ? ToHex(tx.GasPrice) : "0x0",
                 gasUsed = "0x0",
-                logsBloom = "0x" + new string('0', 512),
-                status = "0x1",
+                status = "0x0",  // FIXED: Changed from "0x1" - null receipt means validation failure
                 txHash = tx?.Hash is not null ? CanonicalFormatHelpers.ToCanonicalHash(tx.Hash) : string.Empty
             });
             return;
