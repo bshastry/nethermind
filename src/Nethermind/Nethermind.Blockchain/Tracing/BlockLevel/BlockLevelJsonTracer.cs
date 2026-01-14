@@ -62,7 +62,7 @@ public enum TraceLevel
 /// Block-level JSON tracer implementing the EIP block-level tracing specification.
 /// Writes JSON Lines format (one JSON object per line) for streaming compatibility.
 /// </summary>
-public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposable
+public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IBlockTracerFinalizable, IDisposable
 {
     private readonly TextWriter _writer;
     private readonly TraceLevel _traceLevel;
@@ -79,6 +79,7 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
     private ulong _cumulativeGasUsed;
 #pragma warning restore CS0414
     private bool _disposed;
+    private bool _blockEndWritten; // Tracks if blockEnd has been written for current block to prevent duplicates
 
     /// <summary>
     /// Creates a new block-level JSON tracer.
@@ -118,6 +119,7 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
         _currentBlock = block ?? throw new ArgumentNullException(nameof(block));
         _currentTxIndex = 0;
         _cumulativeGasUsed = 0;
+        _blockEndWritten = false; // Reset for new block
 
         if (ShouldTrace(TraceLevel.BlockLifecycle))
         {
@@ -199,11 +201,25 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
     /// 2. Bloom filter is calculated and set by BlockReceiptsTracer
     /// 3. Before block hash calculation
     /// </summary>
-    public void FinalizeBlockTrace()
+    public void FinalizeBlockTrace() => FinalizeBlockTrace(error: null);
+
+    /// <summary>
+    /// Finalizes block trace with an optional error for invalid blocks.
+    /// When error is provided, the blockEnd record will have validationResult="invalid".
+    /// </summary>
+    /// <param name="error">Error message for invalid blocks, or null for valid blocks</param>
+    public void FinalizeBlockTrace(string? error)
     {
+        // Prevent duplicate blockEnd records - only the first call takes effect
+        // This is important when both error path (catch block) and normal path
+        // (wrapper's EndBlockTrace) try to finalize the block trace
+        if (_blockEndWritten)
+            return;
+
         if (ShouldTrace(TraceLevel.BlockLifecycle) && _currentBlock is not null)
         {
-            WriteBlockEnd(_currentBlock);
+            WriteBlockEnd(_currentBlock, error);
+            _blockEndWritten = true;
         }
 
         // Final flush
@@ -394,28 +410,50 @@ public class BlockLevelJsonTracer : BlockTracerBase<object, ITxTracer>, IDisposa
     /// <summary>
     /// Writes a blockEnd record in canonical format.
     /// </summary>
-    private void WriteBlockEnd(Block block)
+    /// <param name="block">The block being traced</param>
+    /// <param name="error">Optional error message for invalid blocks (used only to determine validationResult)</param>
+    private void WriteBlockEnd(Block block, string? error = null)
     {
-        var record = new
+        bool isValid = error is null;
+
+        // Use SortedDictionary to maintain alphabetical key ordering (matching geth)
+        var record = new SortedDictionary<string, object?>
         {
-            type = "blockEnd",
-            blockNumber = ToHex(block.Number),
-            blockHash = CanonicalFormatHelpers.ToCanonicalHash(block.Hash),
-            logsBloom = block.Bloom is not null ? "0x" + block.Bloom.ToString().ToLowerInvariant() : "0x" + new string('0', 512),
-            receiptsRoot = CanonicalFormatHelpers.ToCanonicalHash(block.ReceiptsRoot),
-            // Optional: requests hash (Prague+)
-            requestsHash = block.RequestsHash is not null ?
-                CanonicalFormatHelpers.ToCanonicalHash(block.RequestsHash) : null,
-            stateRoot = CanonicalFormatHelpers.ToCanonicalHash(block.StateRoot),
-            // Optional: total blob gas (Cancun+)
-            totalBlobGasUsed = block.BlobGasUsed.HasValue ? ToHex(block.BlobGasUsed.Value) : null,
-            totalGasUsed = ToHex(block.GasUsed),
-            transactionsRoot = CanonicalFormatHelpers.ToCanonicalHash(block.TxRoot),
-            validationResult = "valid", // Would need actual validation result from validation operations
-            // Optional: withdrawals root (Shanghai+)
-            withdrawalsRoot = block.WithdrawalsRoot is not null ?
-                CanonicalFormatHelpers.ToCanonicalHash(block.WithdrawalsRoot) : null
+            ["type"] = "blockEnd",
+            ["blockNumber"] = ToHex(block.Number),
+            ["blockHash"] = CanonicalFormatHelpers.ToCanonicalHash(block.Hash),
+            ["logsBloom"] = block.Bloom is not null ? "0x" + block.Bloom.ToString().ToLowerInvariant() : "0x" + new string('0', 512),
+            ["receiptsRoot"] = CanonicalFormatHelpers.ToCanonicalHash(block.ReceiptsRoot),
+            ["totalGasUsed"] = ToHex(block.GasUsed),
+            ["transactionsRoot"] = CanonicalFormatHelpers.ToCanonicalHash(block.TxRoot),
+            ["validationResult"] = isValid ? "valid" : "invalid"
         };
+
+        // stateRoot: only include if it's been calculated (for invalid blocks during processing, it may not be set)
+        // Note: We intentionally do NOT include the error field in blockEnd to match geth's format.
+        // The error details are available in testEnd for tests that require them.
+        if (block.StateRoot is not null)
+        {
+            record["stateRoot"] = CanonicalFormatHelpers.ToCanonicalHash(block.StateRoot);
+        }
+
+        // Optional: requests hash (Prague+)
+        if (block.RequestsHash is not null)
+        {
+            record["requestsHash"] = CanonicalFormatHelpers.ToCanonicalHash(block.RequestsHash);
+        }
+
+        // Optional: total blob gas (Cancun+)
+        if (block.BlobGasUsed.HasValue)
+        {
+            record["totalBlobGasUsed"] = ToHex(block.BlobGasUsed.Value);
+        }
+
+        // Optional: withdrawals root (Shanghai+)
+        if (block.WithdrawalsRoot is not null)
+        {
+            record["withdrawalsRoot"] = CanonicalFormatHelpers.ToCanonicalHash(block.WithdrawalsRoot);
+        }
 
         WriteJsonLine(record);
     }

@@ -100,4 +100,18 @@ namespace Nethermind.Evm.Tracing
     {
         IReadOnlyCollection<TTrace> BuildResult();
     }
+
+    /// <summary>
+    /// Interface for block tracers that support finalization with an error message.
+    /// This allows tracers to emit blockEnd records for invalid blocks with error information.
+    /// </summary>
+    public interface IBlockTracerFinalizable : IBlockTracer
+    {
+        /// <summary>
+        /// Finalizes the block trace with an optional error message.
+        /// When error is provided, the blockEnd record should have validationResult="invalid".
+        /// </summary>
+        /// <param name="error">Error message for invalid blocks, or null for valid blocks.</param>
+        void FinalizeBlockTrace(string? error);
+    }
 }

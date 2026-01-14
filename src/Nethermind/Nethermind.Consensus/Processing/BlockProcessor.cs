@@ -103,66 +103,80 @@ public partial class BlockProcessor(
 
         blockTransactionsExecutor.SetBlockExecutionContext(new BlockExecutionContext(block.Header, spec));
 
-        StoreBeaconRoot(block, spec, blockTracer);
-        ApplyBlockHashStateChanges(block, spec, blockTracer);
-        _stateProvider.Commit(spec, commitRoots: false);
-
-        TxReceipt[] receipts = blockTransactionsExecutor.ProcessTransactions(block, options, ReceiptsTracer, token);
-
-        _stateProvider.Commit(spec, commitRoots: false);
-
-        CalculateBlooms(receipts);
-
-        if (spec.IsEip4844Enabled)
+        try
         {
-            header.BlobGasUsed = BlobGasCalculator.CalculateBlobGas(block.Transactions);
+            StoreBeaconRoot(block, spec, blockTracer);
+            ApplyBlockHashStateChanges(block, spec, blockTracer);
+            _stateProvider.Commit(spec, commitRoots: false);
+
+            TxReceipt[] receipts = blockTransactionsExecutor.ProcessTransactions(block, options, ReceiptsTracer, token);
+
+            _stateProvider.Commit(spec, commitRoots: false);
+
+            CalculateBlooms(receipts);
+
+            if (spec.IsEip4844Enabled)
+            {
+                header.BlobGasUsed = BlobGasCalculator.CalculateBlobGas(block.Transactions);
+            }
+
+            header.ReceiptsRoot = _receiptsRootCalculator.GetReceiptsRoot(receipts, spec, block.ReceiptsRoot);
+            ApplyMinerRewards(block, blockTracer, spec);
+            ProcessWithdrawalsWithTracing(block, spec, blockTracer);
+
+            // We need to do a commit here as in _executionRequestsProcessor while executing system transactions
+            // we do WorldState.Commit(SystemTransactionReleaseSpec.Instance). In SystemTransactionReleaseSpec
+            // Eip158Enabled=false, so we end up persisting empty accounts created while processing withdrawals.
+            _stateProvider.Commit(spec, commitRoots: false);
+
+            // FIX 1: Process execution requests (postExecution records)
+            // This MUST come before validation and blockEnd
+            ProcessExecutionRequestsWithTracing(block, receipts, spec, blockTracer);
+
+            // ===== VALIDATION PHASE =====
+            // FIX 1: Emit validation records BEFORE blockEnd
+            EmitValidationTracing(block, receipts, spec, blockTracer);
+
+            // ===== FINALIZATION PHASE =====
+            // Calculate state root BEFORE EndBlockTrace so it can be included in blockEnd record
+            _stateProvider.Commit(spec, commitRoots: true);
+
+            if (BlockchainProcessor.IsMainProcessingThread)
+            {
+                // Get the accounts that have been changed
+                block.AccountChanges = _stateProvider.GetAccountChanges();
+            }
+
+            if (ShouldComputeStateRoot(header))
+            {
+                _stateProvider.RecalculateStateRoot();
+                header.StateRoot = _stateProvider.StateRoot;
+            }
+
+            // CRITICAL: EndBlockTrace MUST be called before hash calculation!
+            // EndBlockTrace sets the block header Bloom filter by accumulating receipt blooms.
+            // Now that state root is set, we can finalize tracing with both values.
+            // If we call EndBlockTrace after hash calculation, the hash will be wrong!
+            ReceiptsTracer.EndBlockTrace();
+
+            // Finalize block-level tracing now that both state root and bloom are set
+            FinalizeBlockTrace(blockTracer);
+
+            header.Hash = header.CalculateHash();
+
+            return receipts;
         }
-
-        header.ReceiptsRoot = _receiptsRootCalculator.GetReceiptsRoot(receipts, spec, block.ReceiptsRoot);
-        ApplyMinerRewards(block, blockTracer, spec);
-        ProcessWithdrawalsWithTracing(block, spec, blockTracer);
-
-        // We need to do a commit here as in _executionRequestsProcessor while executing system transactions
-        // we do WorldState.Commit(SystemTransactionReleaseSpec.Instance). In SystemTransactionReleaseSpec
-        // Eip158Enabled=false, so we end up persisting empty accounts created while processing withdrawals.
-        _stateProvider.Commit(spec, commitRoots: false);
-
-        // FIX 1: Process execution requests (postExecution records)
-        // This MUST come before validation and blockEnd
-        ProcessExecutionRequestsWithTracing(block, receipts, spec, blockTracer);
-
-        // ===== VALIDATION PHASE =====
-        // FIX 1: Emit validation records BEFORE blockEnd
-        EmitValidationTracing(block, receipts, spec, blockTracer);
-
-        // ===== FINALIZATION PHASE =====
-        // Calculate state root BEFORE EndBlockTrace so it can be included in blockEnd record
-        _stateProvider.Commit(spec, commitRoots: true);
-
-        if (BlockchainProcessor.IsMainProcessingThread)
+        catch (Exception ex)
         {
-            // Get the accounts that have been changed
-            block.AccountChanges = _stateProvider.GetAccountChanges();
+            // On error, still emit blockEnd with validationResult="invalid" and error message
+            // This matches geth's behavior of always emitting blockEnd for blocks that started processing
+            // NOTE: We do NOT call ReceiptsTracer.EndBlockTrace() here because:
+            // 1. The test runner wrapper's EndBlockTrace() would call FinalizeBlockTrace() without error
+            // 2. We need FinalizeBlockTrace to receive the error message for proper invalidation
+            FinalizeBlockTrace(blockTracer, ex.Message);
+
+            throw;
         }
-
-        if (ShouldComputeStateRoot(header))
-        {
-            _stateProvider.RecalculateStateRoot();
-            header.StateRoot = _stateProvider.StateRoot;
-        }
-
-        // CRITICAL: EndBlockTrace MUST be called before hash calculation!
-        // EndBlockTrace sets the block header Bloom filter by accumulating receipt blooms.
-        // Now that state root is set, we can finalize tracing with both values.
-        // If we call EndBlockTrace after hash calculation, the hash will be wrong!
-        ReceiptsTracer.EndBlockTrace();
-
-        // Finalize block-level tracing now that both state root and bloom are set
-        FinalizeBlockTrace(blockTracer);
-
-        header.Hash = header.CalculateHash();
-
-        return receipts;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -440,25 +454,24 @@ public partial class BlockProcessor(
         }
     }
 
-    private static void FinalizeBlockTrace(IBlockTracer blockTracer)
+    private static void FinalizeBlockTrace(IBlockTracer blockTracer, string? error = null)
     {
         if (blockTracer is null || blockTracer is NullBlockTracer)
         {
             return;
         }
 
-        // If the tracer is a BlockLevelJsonTracer, call FinalizeBlockTrace to write blockEnd
-        // with both state root and bloom filter set
-        if (blockTracer is Blockchain.Tracing.BlockLevel.BlockLevelJsonTracer jsonTracer)
+        // Check if the tracer implements IBlockTracerFinalizable (includes BlockLevelJsonTracer and wrappers)
+        if (blockTracer is IBlockTracerFinalizable finalizable)
         {
-            jsonTracer.FinalizeBlockTrace();
+            finalizable.FinalizeBlockTrace(error);
         }
         else if (blockTracer is BlockReceiptsTracer receiptsTracer && receiptsTracer.WrappedBlockTracer is not null)
         {
             // The receipts tracer wraps another tracer - finalize that one
-            FinalizeBlockTrace(receiptsTracer.WrappedBlockTracer);
+            FinalizeBlockTrace(receiptsTracer.WrappedBlockTracer, error);
         }
-        // Note: CompositeBlockTracer support could be added if needed by exposing _childTracers
+        // Note: Custom tracers can implement IBlockTracerFinalizable to support error-aware finalization
     }
 
     private void StoreTxReceipts(Block block, TxReceipt[] txReceipts, IReleaseSpec spec)

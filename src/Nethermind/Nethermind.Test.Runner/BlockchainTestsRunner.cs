@@ -228,7 +228,7 @@ public class BlockchainTestsRunner(
     /// Adapter to wrap a BlockLevelJsonTracer as an ITestBlockTracer.
     /// Uses BlockReceiptsTracer to collect receipt data and pass it to the block-level tracer.
     /// </summary>
-    private class BlockLevelTestTracerAdapter : ITestBlockTracer
+    private class BlockLevelTestTracerAdapter : ITestBlockTracer, IBlockTracerFinalizable
     {
         private readonly BlockReceiptsTracer _receiptsTracer;
         private readonly BlockLevelJsonTracer _blockTracer;
@@ -263,13 +263,18 @@ public class BlockchainTestsRunner(
         {
             _blockTracer.WriteTestEndMarker(testName, pass, spec, duration, headStateRoot, error, errorDetails, lastValidBlock);
         }
+
+        /// <summary>
+        /// Finalizes block trace with optional error for invalid blocks.
+        /// </summary>
+        public void FinalizeBlockTrace(string? error) => _blockTracer.FinalizeBlockTrace(error);
     }
 
     /// <summary>
     /// Composite tracer that delegates to both a test tracer and a block-level tracer.
     /// Uses BlockReceiptsTracer to collect receipt data and pass it to the block-level tracer.
     /// </summary>
-    private class CompositeTestBlockTracer : ITestBlockTracer
+    private class CompositeTestBlockTracer : ITestBlockTracer, IBlockTracerFinalizable
     {
         private readonly ITestBlockTracer _testTracer;
         private readonly BlockReceiptsTracer _receiptsTracer;
@@ -357,5 +362,10 @@ public class BlockchainTestsRunner(
             _testTracer.TestFinished(testName, pass, spec, duration, headStateRoot, error, errorDetails, lastValidBlock);
             _blockTracer.WriteTestEndMarker(testName, pass, spec, duration, headStateRoot, error, errorDetails, lastValidBlock);
         }
+
+        /// <summary>
+        /// Finalizes block trace with optional error for invalid blocks.
+        /// </summary>
+        public void FinalizeBlockTrace(string? error) => _blockTracer.FinalizeBlockTrace(error);
     }
 }
