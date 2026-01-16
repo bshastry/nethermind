@@ -38,7 +38,9 @@ public class BlockchainTestsRunner(
     public async Task<IEnumerable<EthereumTestResult>> RunTestsAsync()
     {
         List<EthereumTestResult> testResults = new();
-        IEnumerable<BlockchainTest> tests = _testsSource.LoadTests<BlockchainTest>();
+        // Use non-generic LoadTests() to handle FailedToLoadTest objects gracefully
+        // instead of Cast<BlockchainTest>() which throws InvalidCastException
+        IEnumerable<EthereumTest> tests = _testsSource.LoadTests();
 
         // Create transaction tracer if requested
         BlockchainTestStreamingTracer? txTracer = null;
@@ -118,10 +120,38 @@ public class BlockchainTestsRunner(
 
         try
         {
-            foreach (BlockchainTest test in tests)
+            foreach (EthereumTest ethereumTest in tests)
             {
-                if (filter is not null && test.Name is not null && !Regex.Match(test.Name, $"^({filter})").Success)
+                if (filter is not null && ethereumTest.Name is not null && !Regex.Match(ethereumTest.Name, $"^({filter})").Success)
                     continue;
+
+                // Handle FailedToLoadTest objects (e.g., unsupported forks like OsakaToBPO1AtTime15k)
+                if (ethereumTest is FailedToLoadTest failedTest)
+                {
+                    Console.Write($"{failedTest.Name,-120} ");
+                    WriteRed(failedTest.LoadFailure ?? "Unknown load failure");
+                    testResults.Add(new EthereumTestResult(failedTest.Name, failedTest.LoadFailure ?? "Unknown load failure"));
+
+                    // Emit testEnd marker to block trace output to maintain trace alignment
+                    if (blockTraceWriter is not null)
+                    {
+                        string errorMsg = failedTest.LoadFailure ?? "Unknown load failure";
+                        // Write testEnd JSON directly - format matches BlockLevelJsonTracer.WriteTestEndMarker
+                        blockTraceWriter.WriteLine($"{{\"testEnd\":{{\"name\":\"{EscapeJsonString(failedTest.Name)}\",\"pass\":false,\"error\":\"{EscapeJsonString(errorMsg)}\"}}}}");
+                        blockTraceWriter.Flush();
+                    }
+                    continue;
+                }
+
+                // Safely cast to BlockchainTest
+                if (ethereumTest is not BlockchainTest test)
+                {
+                    Console.Write($"{ethereumTest.Name,-120} ");
+                    WriteRed($"Unexpected test type: {ethereumTest.GetType().Name}");
+                    testResults.Add(new EthereumTestResult(ethereumTest.Name, $"Unexpected test type: {ethereumTest.GetType().Name}"));
+                    continue;
+                }
+
                 Setup();
 
                 Console.Write($"{test,-120} ");
@@ -222,6 +252,22 @@ public class BlockchainTestsRunner(
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine(text);
         Console.ForegroundColor = _defaultColor;
+    }
+
+    /// <summary>
+    /// Escapes a string for use in JSON output.
+    /// </summary>
+    private static string EscapeJsonString(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return string.Empty;
+
+        return value
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\n", "\\n")
+            .Replace("\r", "\\r")
+            .Replace("\t", "\\t");
     }
 
     /// <summary>
