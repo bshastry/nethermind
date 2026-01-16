@@ -30,6 +30,7 @@ using Nethermind.Specs;
 using Nethermind.Specs.Forks;
 using Nethermind.Specs.Test;
 using Nethermind.Evm.State;
+using Nethermind.Evm.Tracing;
 using Nethermind.Init.Modules;
 using NUnit.Framework;
 using Nethermind.Merge.Plugin.Data;
@@ -208,7 +209,7 @@ public abstract class BlockchainTestBase
             if (test.Blocks is not null)
             {
                 // blockchain test
-                (parentHeader, validationError, lastValidBlockIndex) = SuggestBlocks(test, failOnInvalidRlp, blockValidator, blockTree, parentHeader);
+                (parentHeader, validationError, lastValidBlockIndex) = SuggestBlocks(test, failOnInvalidRlp, blockValidator, blockTree, parentHeader, tracer);
             }
             else if (test.EngineNewPayloads is not null)
             {
@@ -291,7 +292,7 @@ public abstract class BlockchainTestBase
         }
     }
 
-    private static (BlockHeader parentHeader, string? error, long lastValidBlock) SuggestBlocks(BlockchainTest test, bool failOnInvalidRlp, IBlockValidator blockValidator, IBlockTree blockTree, BlockHeader parentHeader)
+    private static (BlockHeader parentHeader, string? error, long lastValidBlock) SuggestBlocks(BlockchainTest test, bool failOnInvalidRlp, IBlockValidator blockValidator, IBlockTree blockTree, BlockHeader parentHeader, ITestBlockTracer? tracer = null)
     {
         List<(Block Block, string ExpectedException)> correctRlp = DecodeRlps(test, failOnInvalidRlp);
         for (int i = 0; i < correctRlp.Count; i++)
@@ -307,6 +308,11 @@ public abstract class BlockchainTestBase
             // Check if parent exists (unless this is genesis block)
             if (currentParentHeader is null && correctRlp[i].Block.Number > 0)
             {
+                string missingParentError = "InvalidAncestor";
+
+                // Emit trace for the invalid block (missing parent)
+                EmitInvalidBlockTrace(tracer, correctRlp[i].Block, missingParentError);
+
                 if (!expectsException)
                 {
                     // Block has missing parent and shouldn't fail → test failed
@@ -320,7 +326,7 @@ public abstract class BlockchainTestBase
                     string expectedError = correctRlp[i].ExpectedException!;
 
                     // Map UNKNOWN_PARENT error
-                    ErrorDetails actualDetails = EestErrorMapper.MapErrorToEEST("InvalidAncestor");
+                    ErrorDetails actualDetails = EestErrorMapper.MapErrorToEEST(missingParentError);
 
                     if (!MatchesExpectedException(actualDetails, expectedError))
                     {
@@ -391,7 +397,9 @@ public abstract class BlockchainTestBase
             }
             else
             {
-                // Validation FAILED
+                // Validation FAILED - emit trace for the invalid block
+                EmitInvalidBlockTrace(tracer, correctRlp[i].Block, validationError);
+
                 if (!expectsException)
                 {
                     return (parentHeader, $"block #" + correctRlp[i].Block.Number + " insertion into chain failed: " + validationError, parentHeader.Number);
@@ -443,6 +451,29 @@ public abstract class BlockchainTestBase
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Emits blockStart and blockEnd traces for blocks that fail validation before being suggested to the chain.
+    /// This ensures trace output includes invalid blocks, matching geth's behavior.
+    /// </summary>
+    private static void EmitInvalidBlockTrace(ITestBlockTracer? tracer, Block block, string? error)
+    {
+        if (tracer is null)
+            return;
+
+        // Emit blockStart
+        tracer.StartNewBlockTrace(block);
+
+        // Emit blockEnd with error (via FinalizeBlockTrace if supported, otherwise regular EndBlockTrace)
+        if (tracer is IBlockTracerFinalizable finalizable)
+        {
+            finalizable.FinalizeBlockTrace(error);
+        }
+        else
+        {
+            tracer.EndBlockTrace();
+        }
     }
 
     private async static Task RunNewPayloads(TestEngineNewPayloadsJson[]? newPayloads, IEngineRpcModule engineRpcModule)
